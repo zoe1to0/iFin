@@ -204,6 +204,97 @@ def inject_styles():
             margin: 0.35rem 0;
         }
 
+        .ifin-market-card {
+            background: #ffffff;
+            border: 1px solid #e6eaf2;
+            border-radius: 16px;
+            padding: 18px 20px;
+            min-height: 220px;
+            box-shadow: 0 8px 22px rgba(23, 32, 51, 0.05);
+            margin-bottom: 1rem;
+        }
+
+        .ifin-market-card-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.6rem;
+            margin-bottom: 0.45rem;
+        }
+
+        .ifin-market-card-title {
+            color: var(--ifin-ink);
+            font-size: 0.98rem;
+            font-weight: 760;
+            line-height: 1.35;
+        }
+
+        .ifin-market-card-value {
+            color: #3b6ff5;
+            font-size: 24px;
+            line-height: 1.18;
+            font-weight: 700;
+            margin: 0.35rem 0 0.45rem;
+        }
+
+        .ifin-market-card-badge,
+        .ifin-market-card-trend {
+            display: inline-block;
+            color: #174ea6;
+            background: #eef5ff;
+            border: 1px solid #d5e6ff;
+            border-radius: 999px;
+            padding: 0.16rem 0.5rem;
+            font-size: 0.74rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .ifin-market-card-body {
+            color: var(--ifin-muted);
+            font-size: 0.9rem;
+            line-height: 1.55;
+            margin: 0.45rem 0 0.55rem;
+        }
+
+        .ifin-market-card-meta-wrap {
+            margin-top: 0.55rem;
+        }
+
+        .ifin-market-card-meta {
+            color: #6b7280;
+            font-size: 14px;
+            line-height: 1.7;
+        }
+
+        .ifin-market-track {
+            position: relative;
+            height: 8px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #dbeafe 0%, #bfdbfe 48%, #3b6ff5 100%);
+            margin: 0.58rem 0 0.25rem;
+        }
+
+        .ifin-market-dot {
+            position: absolute;
+            top: 50%;
+            width: 14px;
+            height: 14px;
+            border-radius: 999px;
+            background: #172033;
+            border: 2px solid #ffffff;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 2px 8px rgba(23, 32, 51, 0.18);
+        }
+
+        .ifin-market-track-labels {
+            display: flex;
+            justify-content: space-between;
+            color: #6b7280;
+            font-size: 0.76rem;
+            margin-bottom: 0.42rem;
+        }
+
         .ifin-position-track {
             position: relative;
             height: 8px;
