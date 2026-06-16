@@ -213,16 +213,18 @@ def render_real_market_data_cards(items):
                 <div class="ifin-status-card">
                     <div class="ifin-card-title">{label}</div>
                     <div class="ifin-number-value">{current}</div>
-                    <div class="ifin-card-meta">1日：{change_1d} · 1月：{change_1m}</div>
-                    <div class="ifin-card-meta">3月：{change_3m} · 1年：{change_1y}</div>
-                    <div class="ifin-card-meta">1年历史分位：{percentile_1y}</div>
                     <div class="ifin-card-body">Insight：{insight}</div>
-                    <div class="ifin-card-meta">截至：{as_of}</div>
-                    <div class="ifin-card-meta">来源：{source}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
+            st.caption(f"1日：{change_1d} · 1月：{change_1m}")
+            st.caption(f"3月：{change_3m} · 1年：{change_1y}")
+            st.caption(f"1年历史分位：{percentile_1y}")
+            st.caption(f"截至：{as_of}")
+            st.caption(f"来源：{source}")
+            if as_of != "待数据接入":
+                st.caption(f"以 {as_of} 可得数据为基准。")
 
 
 def _clean_url(value):
@@ -519,25 +521,26 @@ def render_market_context():
                     <div class="ifin-card-title">{name}</div>
                     <div class="ifin-status-state">{state}</div>
                     <div class="ifin-card-body">当前水平：{current}</div>
-                    <div class="ifin-card-meta">1日：{change_1d} · 1月：{change_1m}</div>
-                    <div class="ifin-card-meta">3月：{change_3m} · 1年：{change_1y}</div>
-                    <div class="ifin-card-meta">1年历史分位：{percentile_1y}</div>
                     <div class="ifin-position-track">
                         <span class="ifin-position-dot" style="left: {position}%;"></span>
                     </div>
                     <div class="ifin-position-labels"><span>低</span><span>高</span></div>
-                    <div class="ifin-card-meta">变化方向：{direction}</div>
-                    <div class="ifin-card-meta">历史分位：{percentile}</div>
-                    <div class="ifin-card-meta">同类/行业位置：{peer_position}</div>
                     <div class="ifin-card-body">{note}</div>
-                    {f'<div class="ifin-card-meta">{mock_note}</div>' if mock_note else ''}
-                    <div class="ifin-card-meta">时间基准：{as_of}</div>
-                    <div class="ifin-card-meta">数据来源：{source}</div>
-                    <div class="ifin-card-meta">{data_note}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
+            st.caption(f"1日：{change_1d} · 1月：{change_1m}")
+            st.caption(f"3月：{change_3m} · 1年：{change_1y}")
+            st.caption(f"1年历史分位：{percentile_1y}")
+            st.caption(f"变化方向：{direction}")
+            st.caption(f"历史分位：{percentile}")
+            st.caption(f"同类/行业位置：{peer_position}")
+            if mock_note:
+                st.caption(mock_note)
+            st.caption(f"时间基准：{as_of}")
+            st.caption(f"数据来源：{source}")
+            st.caption(data_note)
 
 
 def render_key_numbers():
@@ -580,18 +583,20 @@ def render_key_numbers():
                     <div class="ifin-card-title">{name}</div>
                     <div class="ifin-number-value">{value}</div>
                     <span class="ifin-trend">{trend}</span>
-                    <div class="ifin-card-meta">1日：{change_1d} · 1月：{change_1m}</div>
-                    <div class="ifin-card-meta">3月：{change_3m} · 1年：{change_1y}</div>
-                    <div class="ifin-card-meta">1年历史分位：{percentile_1y}</div>
                     <div class="ifin-card-body">{note}</div>
-                    {f'<div class="ifin-card-meta">{mock_note}</div>' if mock_note else ''}
-                    <div class="ifin-card-meta">时间基准：{as_of}</div>
-                    <div class="ifin-card-meta">数据来源：{source}</div>
-                    {f'<div class="ifin-card-meta">{data_note}</div>' if data_note else ''}
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
+            st.caption(f"1日：{change_1d} · 1月：{change_1m}")
+            st.caption(f"3月：{change_3m} · 1年：{change_1y}")
+            st.caption(f"1年历史分位：{percentile_1y}")
+            if mock_note:
+                st.caption(mock_note)
+            st.caption(f"时间基准：{as_of}")
+            st.caption(f"数据来源：{source}")
+            if data_note:
+                st.caption(data_note)
 
 
 def render_impact_chain():
@@ -658,7 +663,6 @@ def render_historical_reference():
             st.markdown(
                 f"""
                 <div class="ifin-history-card">
-                    <div class="ifin-card-meta">{time}</div>
                     <div class="ifin-card-title">{title}</div>
                     <div class="ifin-card-body">市场反应：{reaction}</div>
                     <div class="ifin-card-body">主要风险：{risk}</div>
@@ -666,6 +670,7 @@ def render_historical_reference():
                 """,
                 unsafe_allow_html=True,
             )
+            st.caption(time)
             with st.expander("查看历史参考", expanded=False):
                 st.write(f"年份：{time}")
                 st.write(f"事件名称：{title}")
@@ -865,11 +870,14 @@ def render_event_notes():
             f"""
             <div class="ifin-note">
                 <div class="ifin-card-title">已保存到认知档案</div>
-                <div class="ifin-card-meta">{st.session_state.saved_insight["date"]} · {st.session_state.saved_insight["source_page"]}</div>
                 <div class="ifin-card-body">{st.session_state.saved_insight["note"]}</div>
             </div>
             """,
             unsafe_allow_html=True,
+        )
+        st.caption(
+            f"{st.session_state.saved_insight['date']} · "
+            f"{st.session_state.saved_insight['source_page']}"
         )
 
 
