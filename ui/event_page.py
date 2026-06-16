@@ -1,0 +1,971 @@
+from datetime import datetime
+from html import escape
+from html import unescape
+import re
+from urllib.parse import urlparse
+
+import streamlit as st
+
+from services.event_query_interpreter import interpret_event_query
+from services.event_service import run_event_analysis
+from ui.components import (
+    EVENT_DEMO,
+    get_event_analysis_result,
+    render_event_section_title,
+)
+
+
+EMPTY_STRUCTURED_TEXT = "暂无结构化数据"
+ANALYSIS_EMPTY_TEXT = "暂无结构化分析结果"
+SOFT_UNCERTAINTY_TEXT = "当前公开信息不足，暂不做强判断。"
+DATA_SUPPORT_TEXT = "暂无足够数据支持。"
+MORE_EVIDENCE_TEXT = "需要更多新闻或数据验证。"
+MARKET_DATA_PENDING_TEXT = "待数据接入"
+MARKET_DATA_NOTE_TEXT = "当前为新闻语境判断，非实时行情计算"
+DEFAULT_SOURCE_TEXT = "来源：公开新闻"
+KNOWN_SOURCE_NAMES = {
+    "finance.yahoo": "Yahoo Finance",
+    "yahoo finance": "Yahoo Finance",
+    "cnbc": "CNBC",
+    "marketwatch": "MarketWatch",
+    "akshare": "AkShare",
+    "caixin": "财新",
+    "财新": "财新",
+    "wall street journal": "Wall Street Journal",
+    "wsj": "Wall Street Journal",
+    "reuters": "Reuters",
+    "bloomberg": "Bloomberg",
+}
+INTERNAL_PLACEHOLDERS = {
+    "",
+    "none",
+    "null",
+    "evidence_insufficient",
+    "暂无数据",
+    "证据不足",
+    "暂无解释",
+    "暂无解释。",
+    "暂无历史参考",
+    "暂无历史参考。",
+    "暂无结构化数据",
+    "暂无结构化分析结果",
+}
+HTML_TAG_PATTERN = re.compile(r"</?(div|span|p|br)\b[^>]*>", re.IGNORECASE)
+
+
+def clean_html_text(value):
+    return HTML_TAG_PATTERN.sub("", unescape(str(value or ""))).strip()
+
+
+def safe_get_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, (str, dict)):
+        return [value]
+    return []
+
+
+def safe_text(value, fallback=EMPTY_STRUCTURED_TEXT):
+    if value is None:
+        return fallback
+    text = clean_html_text(value)
+    return text or fallback
+
+
+def display_text(value, fallback=SOFT_UNCERTAINTY_TEXT):
+    text = safe_text(value, fallback)
+    if text.strip().lower() in INTERNAL_PLACEHOLDERS:
+        return fallback
+    return text
+
+
+def format_market_data_note(item):
+    if not isinstance(item, dict):
+        return ""
+    return ""
+
+
+def filter_visible_market_items(items):
+    visible_items = []
+    for item in safe_get_list(items):
+        if isinstance(item, dict) and item.get("is_mock") is True:
+            continue
+        visible_items.append(item)
+    return visible_items
+
+
+def has_hidden_mock_market_items(items):
+    return any(
+        isinstance(item, dict) and item.get("is_mock") is True
+        for item in safe_get_list(items)
+    )
+
+
+def get_real_market_data_items(result):
+    if not isinstance(result, dict):
+        return []
+    real_items = safe_get_list(result.get("_real_market_data"))
+    if real_items:
+        return filter_visible_market_items(real_items)
+    market_data = result.get("_market_data")
+    if isinstance(market_data, dict):
+        return filter_visible_market_items(list(market_data.values()))
+    return []
+
+
+def format_market_label(label):
+    label_text = display_text(label, "市场指标")
+    label_map = {
+        "NVDA": "英伟达",
+        "NVIDIA": "英伟达",
+        "英伟达": "英伟达",
+        "QQQ": "纳斯达克100 ETF",
+        "SOXX": "半导体ETF",
+        "BOTZ": "AI相关ETF",
+        "AIQ": "AI相关ETF",
+        "AMD": "AMD",
+        "TSM": "台积电",
+        "台积电": "台积电",
+        "AI相关ETF": "AI相关ETF",
+        "纳斯达克100 ETF": "纳斯达克100 ETF",
+        "半导体ETF": "半导体ETF",
+    }
+    if label_text in label_map:
+        return label_map[label_text]
+    if label_text == "黄金价格代理":
+        return "黄金（AU9999）"
+    return label_text
+
+
+def infer_market_unit(label, source=""):
+    text = f"{label or ''} {source or ''}"
+    if "黄金" in text and "ETF" not in text:
+        return "元/克"
+    if "美债" in text or "收益率" in text or "US10Y" in text or "^TNX" in text:
+        return "%"
+    if "美元指数" in text or "DXY" in text:
+        return "点"
+    if any(keyword in text for keyword in ["ETF", "GLD", "英伟达", "AMD", "台积电", "NVDA", "TSM"]):
+        return "美元"
+    return ""
+
+
+def format_value_with_unit(value, unit):
+    text = display_text(value, "待数据接入")
+    if not unit or text == "待数据接入" or text.endswith(unit):
+        return text
+    return f"{text} {unit}"
+
+
+def format_percent_text(value, fallback="待数据接入"):
+    text = display_text(value, fallback)
+    if text == fallback:
+        return text
+    try:
+        number = float(text.replace("%", "").strip())
+        return f"{number:.2f}%"
+    except ValueError:
+        return text
+
+
+def percentile_insight(value):
+    text = display_text(value, "")
+    try:
+        number = float(text.replace("%", "").strip())
+    except ValueError:
+        return "暂未形成历史分位判断"
+    if number >= 80:
+        return "接近过去一年高位区间"
+    if number <= 20:
+        return "接近过去一年低位区间"
+    return "位于过去一年中部区域"
+
+
+def format_market_source(source):
+    text = display_text(source, "待数据接入")
+    if "AkShare" in text:
+        return "AkShare"
+    if "Yahoo Finance" in text:
+        return text
+    return text
+
+
+def render_real_market_data_cards(items):
+    cols = st.columns(min(len(items), 4) or 1)
+    for column, item in zip(cols, items):
+        with column:
+            raw_label = item.get("label") or item.get("name")
+            label = format_market_label(raw_label)
+            source = format_market_source(item.get("source"))
+            unit = infer_market_unit(label, source)
+            current = format_value_with_unit(item.get("current"), unit)
+            change_1d = format_percent_text(item.get("change_1d"))
+            change_1m = format_percent_text(item.get("change_1m"))
+            change_3m = format_percent_text(item.get("change_3m"))
+            change_1y = format_percent_text(item.get("change_1y"))
+            percentile_1y = format_percent_text(item.get("percentile_1y"), "暂不计算历史分位")
+            insight = percentile_insight(percentile_1y)
+            as_of = display_text(item.get("as_of"), "待数据接入")
+            st.markdown(
+                f"""
+                <div class="ifin-status-card">
+                    <div class="ifin-card-title">{label}</div>
+                    <div class="ifin-number-value">{current}</div>
+                    <div class="ifin-card-meta">1日：{change_1d} · 1月：{change_1m}</div>
+                    <div class="ifin-card-meta">3月：{change_3m} · 1年：{change_1y}</div>
+                    <div class="ifin-card-meta">1年历史分位：{percentile_1y}</div>
+                    <div class="ifin-card-body">Insight：{insight}</div>
+                    <div class="ifin-card-meta">截至：{as_of}</div>
+                    <div class="ifin-card-meta">来源：{source}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+
+def _clean_url(value):
+    text = safe_text(value, "")
+    if not text or text.strip().lower() in INTERNAL_PLACEHOLDERS:
+        return ""
+    parsed = urlparse(text)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return text
+    return ""
+
+
+def _source_from_url(url):
+    parsed = urlparse(url)
+    domain = parsed.netloc.lower().removeprefix("www.")
+    for keyword, name in KNOWN_SOURCE_NAMES.items():
+        if keyword in domain:
+            return name
+    if not domain:
+        return ""
+    parts = domain.split(".")
+    return parts[-2].title() if len(parts) >= 2 else domain.title()
+
+
+def _looks_like_article_title(text):
+    if len(text) > 32:
+        return True
+    title_markers = ["：", ":", "，", ",", "；", ";", "。", "?", "？", "！", "!"]
+    return any(marker in text for marker in title_markers)
+
+
+def normalize_source_name(item):
+    if not isinstance(item, dict):
+        return ""
+
+    url = _clean_url(item.get("url") or item.get("link") or item.get("source_url") or item.get("source"))
+    source = safe_text(
+        item.get("source")
+        or item.get("publisher")
+        or item.get("platform")
+        or item.get("media"),
+        "",
+    )
+    source_lower = source.lower()
+
+    for keyword, name in KNOWN_SOURCE_NAMES.items():
+        if keyword in source_lower:
+            return name
+
+    if url:
+        return _source_from_url(url)
+
+    if source and source_lower not in INTERNAL_PLACEHOLDERS and not _looks_like_article_title(source):
+        return source
+
+    return ""
+
+
+def format_source_line(item, fallback=DEFAULT_SOURCE_TEXT):
+    if not isinstance(item, dict):
+        return fallback
+
+    url = _clean_url(item.get("url") or item.get("link") or item.get("source_url") or item.get("source"))
+    source_name = normalize_source_name(item)
+    if not source_name and not url:
+        return fallback
+
+    label = f"来源：{escape(source_name or '新闻检索')}"
+    if url:
+        return f'{label} · <a href="{escape(url)}" target="_blank" rel="noopener noreferrer">查看原文</a>'
+    return label
+
+
+def get_evidence_pool(result=None):
+    result = result if isinstance(result, dict) else get_event_analysis_result()
+    return safe_get_list((result or {}).get("evidence_pool"))
+
+
+def get_evidence_items(item, result=None):
+    if not isinstance(item, dict):
+        return []
+    evidence_ids = item.get("evidence_ids", [])
+    if not isinstance(evidence_ids, list):
+        return []
+    evidence_map = {
+        evidence.get("id"): evidence
+        for evidence in get_evidence_pool(result)
+        if isinstance(evidence, dict)
+    }
+    return [
+        evidence_map[evidence_id]
+        for evidence_id in evidence_ids
+        if evidence_id in evidence_map
+    ]
+
+
+def render_evidence_references(item, result=None):
+    evidence_items = get_evidence_items(item, result)
+    if not evidence_items:
+        st.caption("当前判断主要来自新闻语境与模型归纳，暂无直接引用来源。")
+        return
+
+    for evidence in evidence_items:
+        title = display_text(evidence.get("title"), "新闻标题待补充")
+        source = display_text(evidence.get("source"), "公开新闻")
+        date = display_text(evidence.get("date"), "日期待确认")
+        summary = display_text(evidence.get("summary"), "暂无摘要")
+        source_line = format_source_line(evidence, f"来源：{source}")
+        st.markdown(f"**{source}** · {date}")
+        st.write(title)
+        st.caption(summary)
+        st.markdown(source_line, unsafe_allow_html=True)
+
+
+def render_event_evidence_pool():
+    result = get_event_analysis_result()
+    evidence_pool = get_evidence_pool(result)
+    if not evidence_pool:
+        return
+
+    with st.expander("本次使用的新闻来源", expanded=False):
+        for evidence in evidence_pool:
+            if not isinstance(evidence, dict):
+                continue
+            title = display_text(evidence.get("title"), "新闻标题待补充")
+            source = display_text(evidence.get("source"), "公开新闻")
+            date = display_text(evidence.get("date"), "日期待确认")
+            source_line = format_source_line(evidence, f"来源：{source}")
+            st.markdown(f"**{source}** · {date}")
+            st.write(title)
+            st.markdown(source_line, unsafe_allow_html=True)
+
+
+def has_low_evidence(result):
+    if not isinstance(result, dict):
+        return False
+    if result.get("_news_count") == 0:
+        return True
+
+    core_fields = [
+        "event_summary",
+        "market_position",
+        "key_data",
+        "logic_chain",
+        "bull_case",
+        "bear_case",
+        "risk_radar",
+        "insight",
+        "next_watch",
+    ]
+    insufficient_count = 0
+    for field in core_fields:
+        value = result.get(field)
+        if isinstance(value, str) and value.strip().lower() == "evidence_insufficient":
+            insufficient_count += 1
+        elif isinstance(value, list):
+            field_text = " ".join(str(item) for item in value).lower()
+            if "evidence_insufficient" in field_text:
+                insufficient_count += 1
+    return insufficient_count >= 3
+
+
+def render_simple_text_card(text, card_class="ifin-status-card"):
+    st.markdown(
+        f"""
+        <div class="{card_class}">
+            <div class="ifin-card-body">{display_text(text)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def safe_item_text(item, preferred_key="point", fallback=EMPTY_STRUCTURED_TEXT):
+    if isinstance(item, str):
+        return display_text(item, fallback)
+    if isinstance(item, dict):
+        return display_text(
+            item.get(preferred_key)
+            or item.get("name")
+            or item.get("title")
+            or item.get("content")
+            or item.get("explanation"),
+            fallback,
+        )
+    return fallback
+
+
+def render_view_points_safe(title, points, badge_class):
+    result = get_event_analysis_result()
+    st.markdown(f"#### {title}")
+    for item in safe_get_list(points):
+        if isinstance(item, str):
+            point = display_text(item)
+            detail = "当前依据主要来自公开新闻语境，仍需要更多信息验证。"
+        elif isinstance(item, dict):
+            point = display_text(item.get("point") or item.get("content") or item.get("title"))
+            detail = display_text(
+                item.get("detail")
+                or item.get("evidence_summary")
+                or item.get("basis")
+                or item.get("summary")
+                or item.get("explanation"),
+                "当前依据主要来自公开新闻语境，仍需要更多信息验证。",
+            )
+        else:
+            point = SOFT_UNCERTAINTY_TEXT
+            detail = "当前依据主要来自公开新闻语境，仍需要更多信息验证。"
+
+        source_line = format_source_line(item, "来源：公开新闻语境")
+
+        st.markdown(
+            f"""
+            <div class="ifin-view-card">
+                <span class="ifin-mini-badge {badge_class}">{title}</span>
+                <div class="ifin-card-body">{point}</div>
+                <div class="ifin-view-source">{source_line}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        with st.expander("查看依据", expanded=False):
+            st.write(detail)
+            render_evidence_references(item, result)
+            if not get_evidence_items(item, result):
+                st.markdown(source_line, unsafe_allow_html=True)
+
+
+def render_event_summary():
+    render_event_section_title("事件摘要")
+    result = get_event_analysis_result()
+    summary = display_text((result or {}).get("event_summary"), ANALYSIS_EMPTY_TEXT)
+    st.markdown(
+        f"""
+        <div class="ifin-insight-card">
+            <div class="ifin-insight-label">iFin 对事件的简洁解释</div>
+            <div class="ifin-card-body">{summary}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if has_low_evidence(result):
+        st.info("当前检索到的公开信息有限，本次分析更适合作为问题梳理，而不是结论判断。")
+
+
+def render_market_context():
+    render_event_section_title("市场位置")
+    result = get_event_analysis_result()
+    real_market_data = get_real_market_data_items(result)
+    if real_market_data:
+        render_real_market_data_cards(real_market_data)
+        return
+
+    raw_items = safe_get_list((result or {}).get("market_position"))
+    items = filter_visible_market_items(raw_items)
+    if not items and has_hidden_mock_market_items(raw_items):
+        st.info("实时行情暂未接入，本次分析主要基于新闻语境与模型归纳。")
+        return
+    items = items or [ANALYSIS_EMPTY_TEXT]
+    cols = st.columns(min(len(items), 4) or 1)
+    for column, item in zip(cols, items):
+        with column:
+            if isinstance(item, str):
+                render_simple_text_card(item)
+                continue
+            if not isinstance(item, dict):
+                render_simple_text_card(EMPTY_STRUCTURED_TEXT)
+                continue
+
+            name = display_text(item.get("name") or item.get("indicator"), "市场指标")
+            state = display_text(item.get("state") or item.get("position"), "新闻语境判断")
+            position = item.get("position_value") or item.get("position_score") or item.get("position_percent") or item.get("position")
+            if not isinstance(position, (int, float)):
+                position = 50
+            direction = display_text(item.get("direction"), "不确定")
+            percentile = display_text(item.get("percentile"), "暂不计算历史分位")
+            if percentile.strip().lower() in INTERNAL_PLACEHOLDERS:
+                percentile = "暂不计算历史分位"
+            peer_position = display_text(item.get("peer_position"), MARKET_DATA_PENDING_TEXT)
+            data_note = display_text(item.get("data_note"), MARKET_DATA_NOTE_TEXT)
+            note = display_text(item.get("note") or item.get("explanation"), MORE_EVIDENCE_TEXT)
+            current = display_text(item.get("current"), "当前水平：待数据接入")
+            change_1d = display_text(item.get("change_1d"), "待数据接入")
+            change_1m = display_text(item.get("change_1m"), "待数据接入")
+            change_3m = display_text(item.get("change_3m"), "待数据接入")
+            change_1y = display_text(item.get("change_1y"), "待数据接入")
+            percentile_1y = display_text(item.get("percentile_1y"), "暂不计算历史分位")
+            as_of = display_text(item.get("as_of"), "待数据接入")
+            source = display_text(item.get("source"), "待数据接入")
+            mock_note = format_market_data_note(item)
+            st.markdown(
+                f"""
+                <div class="ifin-status-card">
+                    <div class="ifin-card-title">{name}</div>
+                    <div class="ifin-status-state">{state}</div>
+                    <div class="ifin-card-body">当前水平：{current}</div>
+                    <div class="ifin-card-meta">1日：{change_1d} · 1月：{change_1m}</div>
+                    <div class="ifin-card-meta">3月：{change_3m} · 1年：{change_1y}</div>
+                    <div class="ifin-card-meta">1年历史分位：{percentile_1y}</div>
+                    <div class="ifin-position-track">
+                        <span class="ifin-position-dot" style="left: {position}%;"></span>
+                    </div>
+                    <div class="ifin-position-labels"><span>低</span><span>高</span></div>
+                    <div class="ifin-card-meta">变化方向：{direction}</div>
+                    <div class="ifin-card-meta">历史分位：{percentile}</div>
+                    <div class="ifin-card-meta">同类/行业位置：{peer_position}</div>
+                    <div class="ifin-card-body">{note}</div>
+                    {f'<div class="ifin-card-meta">{mock_note}</div>' if mock_note else ''}
+                    <div class="ifin-card-meta">时间基准：{as_of}</div>
+                    <div class="ifin-card-meta">数据来源：{source}</div>
+                    <div class="ifin-card-meta">{data_note}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+
+def render_key_numbers():
+    render_event_section_title("关键数据")
+    result = get_event_analysis_result()
+    raw_items = safe_get_list((result or {}).get("key_data"))
+    items = filter_visible_market_items(raw_items)
+    if not items and has_hidden_mock_market_items(raw_items):
+        st.caption("实时行情数据暂不可用，关键数据暂不展示。")
+        return
+    items = items or [ANALYSIS_EMPTY_TEXT]
+    cols = st.columns(min(len(items), 4) or 1)
+    for column, item in zip(cols, items):
+        with column:
+            if isinstance(item, str):
+                render_simple_text_card(item, "ifin-number-card")
+                continue
+            if not isinstance(item, dict):
+                render_simple_text_card(EMPTY_STRUCTURED_TEXT, "ifin-number-card")
+                continue
+
+            name = display_text(item.get("name") or item.get("metric"), "关键数据")
+            value = display_text(item.get("value") or item.get("current"), DATA_SUPPORT_TEXT)
+            trend = display_text(item.get("trend"), "暂无趋势")
+            if trend == "evidence_insufficient":
+                trend = "暂无足够数据支持。"
+            note = display_text(item.get("note") or item.get("explanation"), MORE_EVIDENCE_TEXT)
+            change_1d = display_text(item.get("change_1d"), "待数据接入")
+            change_1m = display_text(item.get("change_1m"), "待数据接入")
+            change_3m = display_text(item.get("change_3m"), "待数据接入")
+            change_1y = display_text(item.get("change_1y"), "待数据接入")
+            percentile_1y = display_text(item.get("percentile_1y"), "暂不计算历史分位")
+            as_of = display_text(item.get("as_of"), "待数据接入")
+            source = display_text(item.get("source"), "待数据接入")
+            data_note = display_text(item.get("data_note"), "")
+            mock_note = format_market_data_note(item)
+            st.markdown(
+                f"""
+                <div class="ifin-number-card">
+                    <div class="ifin-card-title">{name}</div>
+                    <div class="ifin-number-value">{value}</div>
+                    <span class="ifin-trend">{trend}</span>
+                    <div class="ifin-card-meta">1日：{change_1d} · 1月：{change_1m}</div>
+                    <div class="ifin-card-meta">3月：{change_3m} · 1年：{change_1y}</div>
+                    <div class="ifin-card-meta">1年历史分位：{percentile_1y}</div>
+                    <div class="ifin-card-body">{note}</div>
+                    {f'<div class="ifin-card-meta">{mock_note}</div>' if mock_note else ''}
+                    <div class="ifin-card-meta">时间基准：{as_of}</div>
+                    <div class="ifin-card-meta">数据来源：{source}</div>
+                    {f'<div class="ifin-card-meta">{data_note}</div>' if data_note else ''}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+
+def render_impact_chain():
+    render_event_section_title("影响推导")
+    st.markdown('<div class="ifin-section-subtitle">事件/主题 → 变量 → 市场 → 资产</div>', unsafe_allow_html=True)
+    result = get_event_analysis_result()
+    items = safe_get_list((result or {}).get("logic_chain"))
+    if not items:
+        render_simple_text_card(ANALYSIS_EMPTY_TEXT)
+        return
+
+    for index, item in enumerate(items, start=1):
+        if isinstance(item, str):
+            item = {
+                "step": f"Step {index}",
+                "title": f"Step {index}",
+                "content": item,
+                "description": "",
+                "evidence_ids": [],
+            }
+        elif not isinstance(item, dict):
+            item = {
+                "step": f"Step {index}",
+                "title": "推导步骤",
+                "content": EMPTY_STRUCTURED_TEXT,
+                "description": "",
+                "evidence_ids": [],
+            }
+
+        step = display_text(item.get("step") or f"Step {index}", f"Step {index}")
+        title = display_text(item.get("title") or item.get("content"), "推导步骤")
+        content = display_text(item.get("content") or title, title)
+        description = display_text(item.get("description") or item.get("explanation"), MORE_EVIDENCE_TEXT)
+        with st.expander(f"{step} · {title}", expanded=index == 1):
+            st.markdown(f"**{content}**")
+            st.write(description)
+            if get_evidence_items(item, result):
+                render_evidence_references(item, result)
+            else:
+                st.caption("暂无直接引用来源")
+
+
+def render_historical_reference():
+    render_event_section_title("历史相似事件")
+    result = get_event_analysis_result()
+    items = safe_get_list((result or {}).get("historical_cases")) or EVENT_DEMO["historical_reference"]
+    cols = st.columns(min(len(items), 2) or 1)
+    for column, item in zip(cols, items):
+        with column:
+            if isinstance(item, str):
+                render_simple_text_card(item, "ifin-history-card")
+                continue
+            if not isinstance(item, dict):
+                render_simple_text_card(EMPTY_STRUCTURED_TEXT, "ifin-history-card")
+                continue
+
+            time = display_text(item.get("year") or item.get("time"), "时间待确认")
+            title = display_text(item.get("title") or item.get("event"), "历史参考")
+            reaction = display_text(item.get("market_reaction") or item.get("reaction"), MORE_EVIDENCE_TEXT)
+            risk = display_text(item.get("risk"), MORE_EVIDENCE_TEXT)
+            similarity = display_text(item.get("similarity") or item.get("similar_points"), "类似点需要结合更多历史数据验证。")
+            limitation = display_text(item.get("limitation") or item.get("limits"), "历史案例仅供理解传导路径，不代表未来会重复。")
+            source_line = format_source_line(item, "历史参考：需后续数据源补强")
+            st.markdown(
+                f"""
+                <div class="ifin-history-card">
+                    <div class="ifin-card-meta">{time}</div>
+                    <div class="ifin-card-title">{title}</div>
+                    <div class="ifin-card-body">市场反应：{reaction}</div>
+                    <div class="ifin-card-body">主要风险：{risk}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            with st.expander("查看历史参考", expanded=False):
+                st.write(f"年份：{time}")
+                st.write(f"事件名称：{title}")
+                st.write(f"市场反应：{reaction}")
+                st.write(f"主要风险：{risk}")
+                st.write(f"类似点：{similarity}")
+                st.write(f"局限性：{limitation}")
+                render_evidence_references(item, result)
+                if not get_evidence_items(item, result):
+                    st.markdown(source_line, unsafe_allow_html=True)
+
+
+def render_risk_radar():
+    render_event_section_title("风险雷达")
+    result = get_event_analysis_result()
+    items = safe_get_list((result or {}).get("risk_radar")) or [ANALYSIS_EMPTY_TEXT]
+    cols = st.columns(min(len(items), 3) or 1)
+    for column, item in zip(cols, items):
+        with column:
+            if isinstance(item, str):
+                render_simple_text_card(item, "ifin-risk-card")
+                continue
+            if not isinstance(item, dict):
+                render_simple_text_card(EMPTY_STRUCTURED_TEXT, "ifin-risk-card")
+                continue
+
+            name = display_text(item.get("name") or item.get("risk"), "风险信号")
+            level = display_text(item.get("level"), "中")
+            reason = display_text(item.get("reason") or item.get("explanation"), MORE_EVIDENCE_TEXT)
+            history = display_text(item.get("historical_reference"), "")
+            linked_data = display_text(item.get("linked_data") or item.get("data"), "暂无足够数据支持。")
+            source_line = format_source_line(item, "来源：新闻语境 + 模型归纳")
+            level_class = "ifin-risk-high" if level == "高" else "ifin-risk-mid"
+            st.markdown(
+                f"""
+                <div class="ifin-risk-card">
+                    <span class="ifin-risk-level {level_class}">{level}风险</span>
+                    <div class="ifin-card-title">{name}</div>
+                    <div class="ifin-card-body">{reason}</div>
+                    <div class="ifin-risk-history">{source_line}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            with st.expander("查看风险依据", expanded=False):
+                st.write(f"风险原因：{reason}")
+                st.write(f"关联数据：{linked_data}")
+                st.write(f"历史参考：{history or '需要更多历史数据验证。'}")
+                render_evidence_references(item, result)
+                if not get_evidence_items(item, result):
+                    st.markdown(source_line, unsafe_allow_html=True)
+
+
+def render_bull_vs_bear():
+    render_event_section_title("支持逻辑 / 担忧逻辑")
+    result = get_event_analysis_result()
+    bull_points = safe_get_list((result or {}).get("bull_case")) or [ANALYSIS_EMPTY_TEXT]
+    bear_points = safe_get_list((result or {}).get("bear_case")) or [ANALYSIS_EMPTY_TEXT]
+    bull_col, bear_col = st.columns(2)
+    with bull_col:
+        render_view_points_safe("支持逻辑", bull_points, "ifin-green-badge")
+    with bear_col:
+        render_view_points_safe("担忧逻辑", bear_points, "ifin-blue-badge")
+
+
+def render_ifin_insight():
+    render_event_section_title("iFin Insight / 认知锚点")
+    result = get_event_analysis_result()
+    insight = display_text((result or {}).get("insight"), ANALYSIS_EMPTY_TEXT)
+    st.markdown(
+        f"""
+        <div class="ifin-insight-card">
+            <div class="ifin-insight-label">本次事件最值得记住的一件事</div>
+            <div class="ifin-insight-text">{insight}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_watch_next():
+    render_event_section_title("继续探索")
+    result = get_event_analysis_result()
+    items = safe_get_list((result or {}).get("next_watch"))
+    if not items:
+        render_simple_text_card("暂无更多探索方向")
+        return
+
+    cols = st.columns(min(len(items), 5) or 1)
+    for index, (column, item) in enumerate(zip(cols, items), start=1):
+        with column:
+            if isinstance(item, str):
+                title = display_text(item, "探索方向")
+                explanation = "这个方向可以帮助继续观察事件背后的驱动因素。"
+                item_query = title
+                source_line = ""
+            elif isinstance(item, dict):
+                title = display_text(item.get("item") or item.get("title") or item.get("name"), "探索方向")
+                explanation = display_text(
+                    item.get("description")
+                    or item.get("why")
+                    or item.get("reason")
+                    or item.get("explanation"),
+                    "这个方向可以帮助继续观察事件背后的驱动因素。",
+                )
+                item_query = display_text(
+                    item.get("query")
+                    or item.get("item")
+                    or item.get("title")
+                    or title,
+                    title,
+                )
+                source_line = format_source_line(item, "")
+                if st.button(title, key=f"event_next_watch_title_{index}", width="stretch"):
+                    st.session_state["pending_event_input"] = item_query
+                    st.session_state["event_explore_notice"] = f"已填入：{title}，可以点击“开始分析”继续。"
+                    st.rerun()
+                st.markdown(
+                    f"""
+                    <div class="ifin-status-card">
+                        <div class="ifin-card-body">{explanation}</div>
+                        {f'<div class="ifin-view-source">{source_line}</div>' if source_line else ''}
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                with st.expander("查看依据", expanded=False):
+                    st.write(explanation)
+                    render_evidence_references(item, result)
+                    if not get_evidence_items(item, result) and source_line:
+                        st.markdown(source_line, unsafe_allow_html=True)
+                continue
+            else:
+                title = "探索方向"
+                explanation = EMPTY_STRUCTURED_TEXT
+                item_query = title
+                source_line = ""
+
+            if st.button(title, key=f"event_next_watch_title_{index}", width="stretch"):
+                st.session_state["pending_event_input"] = item_query
+                st.session_state["event_explore_notice"] = f"已填入：{title}，可以点击“开始分析”继续。"
+                st.rerun()
+            st.markdown(
+                f"""
+                <div class="ifin-status-card">
+                    <div class="ifin-card-body">{explanation}</div>
+                    {f'<div class="ifin-view-source">{source_line}</div>' if source_line else ''}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            with st.expander("查看依据", expanded=False):
+                st.write(explanation)
+                render_evidence_references(item, result)
+                if not get_evidence_items(item, result) and source_line:
+                    st.markdown(source_line, unsafe_allow_html=True)
+
+
+def render_event_notes():
+    render_event_section_title("我的笔记")
+    st.caption("记录你的理解、疑问、情绪、灵感或后续观察。这里没有标准答案。")
+    result = get_event_analysis_result()
+    st.session_state.setdefault("note_content", "")
+    st.session_state.setdefault("saved_insight", {})
+    note_content = st.text_area(
+        "我的笔记",
+        value=st.session_state.note_content,
+        placeholder="例如：我现在还不确定这次利率信号会持续多久，但感觉市场已经提前反映了一部分乐观预期。",
+        label_visibility="collapsed",
+        height=220,
+    )
+    if st.button("保存到认知档案", width="stretch"):
+        st.session_state.note_content = note_content
+        support_items = safe_get_list((result or {}).get("bull_case")) or [ANALYSIS_EMPTY_TEXT]
+        concern_items = safe_get_list((result or {}).get("bear_case")) or [ANALYSIS_EMPTY_TEXT]
+        risk_items = safe_get_list((result or {}).get("risk_radar")) or [ANALYSIS_EMPTY_TEXT]
+        saved_insight = {
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "event": st.session_state.current_event_title,
+            "event_summary": (result or {}).get("event_summary") or ANALYSIS_EMPTY_TEXT,
+            "support_logic": [safe_item_text(item, "point", "暂无内容") for item in support_items],
+            "concern_logic": [safe_item_text(item, "point", "暂无内容") for item in concern_items],
+            "risk_radar": [safe_item_text(item, "name", "风险信号") for item in risk_items],
+            "ifin_insight": (result or {}).get("insight") or ANALYSIS_EMPTY_TEXT,
+            "note": note_content,
+            "focus_tags": [],
+            "source_page": "Event Analysis",
+            "created_at": datetime.now().strftime("%Y.%m.%d"),
+            "updated_at": "",
+        }
+        st.session_state.saved_insight = saved_insight
+        st.session_state.saved_insights.append(saved_insight)
+        st.success("已保存到认知档案")
+
+    if st.session_state.saved_insight:
+        st.markdown(
+            f"""
+            <div class="ifin-note">
+                <div class="ifin-card-title">已保存到认知档案</div>
+                <div class="ifin-card-meta">{st.session_state.saved_insight["date"]} · {st.session_state.saved_insight["source_page"]}</div>
+                <div class="ifin-card-body">{st.session_state.saved_insight["note"]}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def render_event_beta_disclaimer():
+    st.markdown(
+        """
+        <div class="ifin-note">
+            <div class="ifin-card-title">iFin Beta</div>
+            <div class="ifin-card-body">
+                本页面基于公开信息、新闻检索与模型生成分析，仅用于学习、研究和产品体验，不构成任何投资建议。
+                市场信息可能存在延迟、缺失或解释偏差，请结合官方公告与专业判断使用。
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_event_analysis():
+    if "pending_event_input" in st.session_state:
+        st.session_state["event_input"] = st.session_state.pop("pending_event_input")
+
+    st.markdown(
+        """
+        <div class="ifin-event-input">
+            <div class="ifin-kicker">Event Analysis V1.5</div>
+            <h1>事件分析</h1>
+            <p class="ifin-hero-subtitle">从事件、数据与历史中理解市场变化。</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    event_text = st.text_area(
+        "输入事件",
+        placeholder="输入你想分析的市场事件，例如：美联储利率决议影响市场风险偏好",
+        key="event_input",
+    )
+    if st.session_state.get("event_explore_notice"):
+        st.info(st.session_state.pop("event_explore_notice"))
+    use_real_llm = st.checkbox("使用真实 LLM 分析", value=False)
+    current_result = get_event_analysis_result()
+    typed_input = event_text.strip()
+    input_interpretation = interpret_event_query(typed_input) if typed_input else {}
+    routed_topics = safe_get_list((current_result or {}).get("_suggested_queries"))
+    topic_label = (current_result or {}).get("_topic_label")
+    assumption = input_interpretation.get("assumption") or (current_result or {}).get("_assumption")
+    candidate_topics = safe_get_list(
+        routed_topics
+        or input_interpretation.get("candidate_topics")
+        or (current_result or {}).get("_candidate_topics")
+    )
+    if topic_label:
+        st.caption(f"当前主题：{topic_label}")
+    elif assumption:
+        st.caption(f"当前理解：{assumption}")
+    if candidate_topics:
+        st.caption("你也可以继续探索：")
+        topic_columns = st.columns(min(len(candidate_topics), 4) or 1)
+        for index, topic in enumerate(candidate_topics):
+            if isinstance(topic, dict):
+                label = display_text(topic.get("label"), "")
+                query = display_text(topic.get("query") or topic.get("label"), label or "探索方向")
+            else:
+                label = display_text(topic, "")
+                query = label
+            if not label:
+                continue
+            with topic_columns[index % len(topic_columns)]:
+                if st.button(label, key=f"event_candidate_topic_{index}", width="stretch"):
+                    st.session_state["pending_event_input"] = query
+                    st.session_state["event_explore_notice"] = f"已填入：{label}，可以点击“开始分析”继续。"
+                    st.rerun()
+    if st.button("开始分析", width="stretch"):
+        analysis_input = event_text.strip() or EVENT_DEMO["examples"][0]
+        st.session_state.current_event_title = analysis_input
+        st.session_state.event_analysis_result = run_event_analysis(
+            analysis_input,
+            use_real_llm=use_real_llm,
+        )
+        st.session_state.event_analysis_mode = "Real LLM" if use_real_llm else "Mock Pipeline"
+        st.session_state.event_demo_ready = True
+
+    if event_text:
+        st.session_state.current_event_title = event_text.strip()
+    else:
+        st.session_state.current_event_title = EVENT_DEMO["examples"][0]
+
+    render_event_summary()
+    render_event_evidence_pool()
+    render_market_context()
+    render_key_numbers()
+    render_impact_chain()
+    render_bull_vs_bear()
+    render_historical_reference()
+    render_risk_radar()
+    render_ifin_insight()
+    render_watch_next()
+    render_event_notes()
+    render_event_beta_disclaimer()
