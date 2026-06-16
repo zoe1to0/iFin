@@ -1,10 +1,14 @@
 """Parser utilities for future Event Analysis LLM responses."""
 
-import re
 import json
+import logging
+import re
 from html import unescape
 
 from schemas.event_schema import EVENT_ANALYSIS_SCHEMA
+
+
+logger = logging.getLogger(__name__)
 
 
 MARKET_POSITION_DEFAULTS = {
@@ -25,6 +29,13 @@ MARKET_POSITION_DEFAULTS = {
 }
 
 KEY_DATA_DEFAULTS = {
+    "label": "",
+    "value": "",
+    "unit": "",
+    "period": "",
+    "insight": "",
+    "source": "",
+    "confidence": "unavailable",
     "current": "",
     "change_1d": "",
     "change_1m": "",
@@ -104,6 +115,14 @@ def validate_event_schema(data: dict) -> dict:
         validated.get("market_position")
     )
     validated["key_data"] = _normalize_key_data(validated.get("key_data"))
+    if _has_high_market_key_overlap(
+        validated["market_position"],
+        validated["key_data"],
+    ):
+        logger.warning(
+            "Event parser downgraded key_data because it overlaps with market_position"
+        )
+        validated["key_data"] = []
     validated["logic_chain"] = _normalize_logic_chain(
         validated.get("logic_chain")
     )
@@ -185,27 +204,77 @@ def _normalize_market_position(value: list) -> list:
 
 def _normalize_key_data(value: list) -> list:
     normalized = []
+    seen_labels = set()
     for item in value if isinstance(value, list) else []:
         if isinstance(item, dict):
+            label = item.get("label") or item.get("name") or ""
+            label_key = str(label).strip().lower()
+            if label_key and label_key in seen_labels:
+                continue
+            if label_key:
+                seen_labels.add(label_key)
             normalized_item = {
-                "name": item.get("name", ""),
+                "label": label,
+                "name": item.get("name") or label,
                 "trend": item.get("trend", ""),
                 "explanation": item.get("explanation", ""),
                 "value": item.get("value", ""),
+                "unit": item.get("unit", ""),
+                "insight": item.get("insight") or item.get("explanation", ""),
+                "confidence": item.get("confidence", "unavailable"),
             }
             normalized_item.update(_copy_market_data_fields(item, KEY_DATA_DEFAULTS))
+            normalized_item["period"] = item.get(
+                "period",
+                normalized_item.get("period", ""),
+            )
+            normalized_item["source"] = item.get(
+                "source",
+                normalized_item.get("source", ""),
+            )
             normalized.append(normalized_item)
         elif isinstance(item, str):
+            label_key = item.strip().lower()
+            if label_key and label_key in seen_labels:
+                continue
+            if label_key:
+                seen_labels.add(label_key)
             normalized.append(
                 {
+                    "label": item,
                     "name": item,
                     "trend": "",
                     "explanation": "",
                     "value": "",
+                    "unit": "",
+                    "insight": "",
+                    "confidence": "unavailable",
                     **KEY_DATA_DEFAULTS,
                 }
             )
     return normalized
+
+
+def _normalized_label_set(items: list, keys: tuple[str, ...]) -> set[str]:
+    labels = set()
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        for key in keys:
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                labels.add(value.strip().lower())
+                break
+    return labels
+
+
+def _has_high_market_key_overlap(market_position: list, key_data: list) -> bool:
+    market_labels = _normalized_label_set(market_position, ("name", "label"))
+    key_labels = _normalized_label_set(key_data, ("label", "name"))
+    if not market_labels or not key_labels:
+        return False
+    overlap = market_labels.intersection(key_labels)
+    return len(overlap) / max(1, len(key_labels)) >= 0.6
 
 
 def _normalize_logic_chain(value: list) -> list:

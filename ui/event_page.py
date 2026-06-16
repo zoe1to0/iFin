@@ -538,16 +538,15 @@ def render_event_summary():
 def render_market_context():
     render_event_section_title("市场位置")
     result = get_event_analysis_result()
-    real_market_data = get_real_market_data_items(result)
-    if real_market_data:
-        render_real_market_data_cards(real_market_data)
-        return
-
-    raw_items = safe_get_list((result or {}).get("market_position"))
-    items = filter_visible_market_items(raw_items)
-    if not items and has_hidden_mock_market_items(raw_items):
-        st.info("实时行情暂未接入，本次分析主要基于新闻语境与模型归纳。")
-        return
+    market_position_items = (result or {}).get("market_position_items")
+    if market_position_items:
+        items = safe_get_list(market_position_items)
+    else:
+        raw_items = safe_get_list((result or {}).get("market_position"))
+        items = filter_visible_market_items(raw_items)
+        if not items and has_hidden_mock_market_items(raw_items):
+            st.info("实时行情暂未接入，本次分析主要基于新闻语境与模型归纳。")
+            return
     items = items or [ANALYSIS_EMPTY_TEXT]
     cols = st.columns(min(len(items), 4) or 1)
     for column, item in zip(cols, items):
@@ -603,15 +602,57 @@ def render_market_context():
             )
 
 
+def key_data_unavailable(items):
+    if not items:
+        return True
+    for item in safe_get_list(items):
+        if not isinstance(item, dict):
+            return False
+        confidence = str(item.get("confidence", "")).lower()
+        value = str(item.get("value", ""))
+        source = str(item.get("source", ""))
+        if confidence not in {"unavailable", "estimated"}:
+            return False
+        if "尚未接入" not in value and "待接入" not in source:
+            return False
+    return True
+
+
+def render_key_data_empty_state(items=None):
+    labels = []
+    for item in safe_get_list(items):
+        if isinstance(item, dict):
+            label = display_text(item.get("label") or item.get("name"), "")
+            if label:
+                labels.append(label)
+    if not labels:
+        labels = ["政策变量", "需求变量", "供给变量", "宏观变量"]
+    label_text = "、".join(labels[:6])
+    st.markdown(
+        f"""
+        <div class="ifin-key-empty-card">
+            <div class="ifin-market-card-title">关键事件变量</div>
+            <div class="ifin-market-card-body">
+                该主题的关键事件变量包括：{escape(label_text, quote=True)}。
+                当前版本尚未接入稳定数据源，因此暂不展示伪量化数据。
+            </div>
+            <div class="ifin-market-card-meta">数据状态：待接入主题变量数据源</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_key_numbers():
     render_event_section_title("关键数据")
     result = get_event_analysis_result()
-    raw_items = safe_get_list((result or {}).get("key_data"))
-    items = filter_visible_market_items(raw_items)
-    if not items and has_hidden_mock_market_items(raw_items):
-        st.caption("实时行情数据暂不可用，关键数据暂不展示。")
+    items = safe_get_list((result or {}).get("key_data_items"))
+    if not items:
+        render_key_data_empty_state()
         return
-    items = items or [ANALYSIS_EMPTY_TEXT]
+    if key_data_unavailable(items):
+        render_key_data_empty_state(items)
+        return
     cols = st.columns(min(len(items), 4) or 1)
     for column, item in zip(cols, items):
         with column:
@@ -622,34 +663,25 @@ def render_key_numbers():
                 render_simple_text_card(EMPTY_STRUCTURED_TEXT, "ifin-number-card")
                 continue
 
-            name = display_text(item.get("name") or item.get("metric"), "关键数据")
-            value = display_text(item.get("value") or item.get("current"), DATA_SUPPORT_TEXT)
-            trend = display_text(item.get("trend"), "暂无趋势")
+            name = display_text(item.get("label") or item.get("name") or item.get("metric"), "关键数据")
+            unit = display_text(item.get("unit"), "")
+            raw_value = display_text(item.get("value"), DATA_SUPPORT_TEXT)
+            value = f"{raw_value} {unit}".strip()
+            trend = display_text(item.get("confidence") or item.get("trend"), "暂无趋势")
             if trend == "evidence_insufficient":
                 trend = "暂无足够数据支持。"
-            note = display_text(item.get("note") or item.get("explanation"), MORE_EVIDENCE_TEXT)
-            change_1d = display_text(item.get("change_1d"), "待数据接入")
-            change_1m = display_text(item.get("change_1m"), "待数据接入")
-            change_3m = display_text(item.get("change_3m"), "待数据接入")
-            change_1y = display_text(item.get("change_1y"), "待数据接入")
-            percentile_1y = display_text(item.get("percentile_1y"), "暂不计算历史分位")
-            as_of = display_text(item.get("as_of"), "待数据接入")
-            source = display_text(item.get("source"), "待数据接入")
-            data_note = display_text(item.get("data_note"), "")
-            mock_note = format_market_data_note(item)
+            note = display_text(item.get("insight") or item.get("note") or item.get("explanation"), MORE_EVIDENCE_TEXT)
+            period = display_text(item.get("period"), "待数据接入")
+            source = display_text(item.get("source"), "待接入主题变量数据源")
             render_market_data_card(
                 {
                     "title": name,
                     "current_value": value,
                     "trend": trend,
                     "body": note,
-                    "change_line_1": f"1日：{change_1d} · 1月：{change_1m}",
-                    "change_line_2": f"3月：{change_3m} · 1年：{change_1y}",
-                    "percentile_line": f"1年历史分位：{percentile_1y}",
-                    "extra_meta": [mock_note],
-                    "as_of_line": f"时间基准：{as_of}",
+                    "extra_meta": [f"统计区间：{period}"],
                     "source_line": f"数据来源：{source}",
-                    "data_note": data_note,
+                    "data_note": "事件变量数据不同于行情代理资产，不使用 NVDA / QQQ 等市场价格替代。",
                 }
             )
 

@@ -207,11 +207,11 @@ def inject_styles():
         .ifin-market-card {
             background: #ffffff;
             border: 1px solid #e6eaf2;
-            border-radius: 16px;
-            padding: 18px 20px;
-            min-height: 220px;
-            box-shadow: 0 8px 22px rgba(23, 32, 51, 0.05);
-            margin-bottom: 1rem;
+            border-radius: 14px;
+            padding: 16px;
+            min-height: 172px;
+            box-shadow: 0 8px 18px rgba(23, 32, 51, 0.04);
+            margin-bottom: 0.85rem;
         }
 
         .ifin-market-card-head {
@@ -219,22 +219,22 @@ def inject_styles():
             align-items: center;
             justify-content: space-between;
             gap: 0.6rem;
-            margin-bottom: 0.45rem;
+            margin-bottom: 0.35rem;
         }
 
         .ifin-market-card-title {
             color: var(--ifin-ink);
-            font-size: 0.98rem;
+            font-size: 0.94rem;
             font-weight: 760;
             line-height: 1.35;
         }
 
         .ifin-market-card-value {
             color: #3b6ff5;
-            font-size: 24px;
+            font-size: 21px;
             line-height: 1.18;
             font-weight: 700;
-            margin: 0.35rem 0 0.45rem;
+            margin: 0.24rem 0 0.34rem;
         }
 
         .ifin-market-card-badge,
@@ -244,27 +244,27 @@ def inject_styles():
             background: #eef5ff;
             border: 1px solid #d5e6ff;
             border-radius: 999px;
-            padding: 0.16rem 0.5rem;
-            font-size: 0.74rem;
+            padding: 0.13rem 0.46rem;
+            font-size: 0.72rem;
             font-weight: 700;
             white-space: nowrap;
         }
 
         .ifin-market-card-body {
             color: var(--ifin-muted);
-            font-size: 0.9rem;
-            line-height: 1.55;
-            margin: 0.45rem 0 0.55rem;
+            font-size: 0.84rem;
+            line-height: 1.48;
+            margin: 0.34rem 0 0.42rem;
         }
 
         .ifin-market-card-meta-wrap {
-            margin-top: 0.55rem;
+            margin-top: 0.42rem;
         }
 
         .ifin-market-card-meta {
             color: #6b7280;
-            font-size: 14px;
-            line-height: 1.7;
+            font-size: 12.5px;
+            line-height: 1.56;
         }
 
         .ifin-market-track {
@@ -272,7 +272,7 @@ def inject_styles():
             height: 8px;
             border-radius: 999px;
             background: linear-gradient(90deg, #dbeafe 0%, #bfdbfe 48%, #3b6ff5 100%);
-            margin: 0.58rem 0 0.25rem;
+            margin: 0.46rem 0 0.22rem;
         }
 
         .ifin-market-dot {
@@ -292,7 +292,17 @@ def inject_styles():
             justify-content: space-between;
             color: #6b7280;
             font-size: 0.76rem;
-            margin-bottom: 0.42rem;
+            margin-bottom: 0.32rem;
+        }
+
+        .ifin-key-empty-card {
+            background: #f8fafc;
+            border: 1px solid #e5e7eb;
+            border-radius: 14px;
+            padding: 16px;
+            min-height: 118px;
+            box-shadow: 0 8px 18px rgba(23, 32, 51, 0.03);
+            margin-bottom: 0.85rem;
         }
 
         .ifin-position-track {

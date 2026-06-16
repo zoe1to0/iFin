@@ -168,17 +168,17 @@ def _build_evidence_pool(news_result: dict) -> list[dict]:
     return _clean_html_tags(evidence_pool)
 
 
-def _apply_market_data_to_analysis(result: dict, market_data_context: dict) -> dict:
-    """Attach normalized market data to market_position and key_data fields."""
+def _build_market_position_items(market_data_context: dict) -> list[dict]:
+    """Build market-environment proxy items from market data only."""
     if not market_data_context:
-        return result
+        return []
 
     market_items = [
         (key, data)
         for key, data in market_data_context.items()
         if isinstance(data, dict)
     ]
-    result["market_position"] = [
+    return [
         {
             "name": data.get("label") or key.upper(),
             "position": "待行情数据接入" if data.get("is_mock") else "已接入行情数据",
@@ -208,32 +208,94 @@ def _apply_market_data_to_analysis(result: dict, market_data_context: dict) -> d
         for key, data in market_items
     ]
 
-    result["key_data"] = [
-        {
-            "name": data.get("label") or key.upper(),
-            "trend": "待真实数据源验证" if data.get("is_mock") else "已接入行情数据",
-            "explanation": DATA_PACK_EXPLANATIONS.get(
-                key,
-                "用于观察当前主题下的核心行情变量。",
-            ),
-            "current": data.get("current", ""),
-            "change_1d": data.get("change_1d", ""),
-            "change_1m": data.get("change_1m", ""),
-            "change_3m": data.get("change_3m", ""),
-            "change_1y": data.get("change_1y", ""),
-            "percentile_1y": data.get("percentile_1y", ""),
-            "as_of": data.get("as_of", ""),
-            "period": data.get("period", ""),
-            "source": data.get("source", ""),
-            "is_mock": data.get("is_mock", True),
-            "data_note": (
-                "实时行情暂未接入，本项仅为内部状态。"
-                if data.get("is_mock")
-                else f"以 {data.get('as_of', '可得数据')} 可得数据为基准。"
-            ),
-        }
-        for key, data in market_items
+
+KEY_DATA_VARIABLES = {
+    "ai_sector": [
+        ("Cloud CAPEX", "云厂商资本开支是 AI 基础设施需求能否延续的重要变量。"),
+        ("GPU demand", "GPU 需求决定算力链条的订单能见度与供给紧张程度。"),
+        ("Data center investment", "数据中心投资反映 AI 训练和推理基础设施扩张节奏。"),
+        ("AI revenue growth", "AI 收入增长用于验证商业化是否正在兑现。"),
+        ("Semiconductor supply constraint", "半导体供给约束会影响交付、利润率和产业链节奏。"),
+    ],
+    "semiconductor": [
+        ("AI chip orders", "AI 芯片订单能见度决定产业链景气度判断。"),
+        ("Advanced node capacity", "先进制程产能影响高端芯片供给和议价能力。"),
+        ("Export control scope", "出口管制范围会改变需求分布与供应链风险。"),
+        ("Inventory cycle", "库存周期影响芯片板块收入和利润率修复节奏。"),
+        ("Gross margin pressure", "毛利率压力用于观察供需和竞争格局变化。"),
+    ],
+    "precious_metal": [
+        ("ETF fund flow", "黄金 ETF 资金流可辅助判断资金偏好是否持续。"),
+        ("Central bank gold purchases", "央行购金影响中长期黄金需求结构。"),
+        ("Real yield", "实际利率是黄金机会成本的重要观察变量。"),
+        ("Inflation data", "通胀数据会影响实际利率和避险叙事。"),
+        ("Dollar trend", "美元趋势会影响黄金的相对吸引力。"),
+    ],
+    "macro": [
+        ("Inflation surprise", "通胀偏离预期会影响利率路径定价。"),
+        ("Labor market strength", "就业韧性会改变市场对政策转向的判断。"),
+        ("Policy guidance", "央行表态影响未来利率路径预期。"),
+        ("Liquidity condition", "流动性环境决定风险资产估值压力。"),
+        ("Volatility regime", "波动率状态影响市场风险偏好。"),
+    ],
+    "crypto": [
+        ("ETF fund flow", "现货 ETF 资金流用于观察边际资金需求。"),
+        ("Dollar liquidity", "美元流动性会影响加密资产风险偏好。"),
+        ("Leverage condition", "杠杆水平会放大价格波动。"),
+        ("Regulatory signal", "监管信号影响市场参与意愿和风险溢价。"),
+    ],
+    "commodity": [
+        ("Inventory change", "库存变化用于观察供需松紧。"),
+        ("Production policy", "产量政策影响供给预期。"),
+        ("Demand outlook", "需求预期决定价格弹性。"),
+        ("Geopolitical risk", "地缘风险可能改变风险溢价。"),
+    ],
+    "real_estate": [
+        ("Sales volume", "销售数据反映需求端修复力度。"),
+        ("Financing condition", "融资环境影响房企现金流和信用风险。"),
+        ("Mortgage rate", "按揭利率影响购房需求和居民负担。"),
+        ("Policy support", "政策力度影响市场预期和传导节奏。"),
+    ],
+}
+
+
+def _build_key_data_items(topic_info: dict) -> list[dict]:
+    """Build event-variable items without reusing market proxy prices."""
+    topic_type = (topic_info or {}).get("topic_type", "general")
+    variables = KEY_DATA_VARIABLES.get(topic_type) or [
+        ("Policy variable", "政策变量会影响市场对事件后续路径的理解。"),
+        ("Demand variable", "需求变量用于判断主题是否有基本面支撑。"),
+        ("Supply variable", "供给变量会影响价格、利润率和行业节奏。"),
+        ("Macro variable", "宏观变量会改变风险偏好与资金成本。"),
     ]
+    return [
+        {
+            "label": label,
+            "value": "尚未接入稳定数据源",
+            "unit": "",
+            "period": "MVP Beta",
+            "insight": insight,
+            "source": "待接入主题变量数据源",
+            "confidence": "unavailable",
+            "is_event_variable": True,
+        }
+        for label, insight in variables
+    ]
+
+
+def _apply_market_semantics_to_analysis(
+    result: dict,
+    market_data_context: dict,
+    topic_info: dict,
+) -> dict:
+    """Attach separated market-position and key-data semantics."""
+    market_position_items = _build_market_position_items(market_data_context)
+    key_data_items = _build_key_data_items(topic_info)
+    if market_position_items:
+        result["market_position"] = market_position_items
+    result["market_position_items"] = result.get("market_position", [])
+    result["key_data"] = key_data_items
+    result["key_data_items"] = key_data_items
     return result
 
 
@@ -546,9 +608,10 @@ def run_event_analysis(
             if raw_llm_response and raw_llm_response != PLACEHOLDER_MESSAGE:
                 parsed_llm_response = parse_event_response(raw_llm_response)
                 if _has_meaningful_analysis(parsed_llm_response):
-                    parsed_llm_response = _apply_market_data_to_analysis(
+                    parsed_llm_response = _apply_market_semantics_to_analysis(
                         parsed_llm_response,
                         market_data_context,
+                        topic_info,
                     )
                     parsed_llm_response["evidence_pool"] = evidence_pool
                     parsed_llm_response["_source"] = "llm"
@@ -570,9 +633,10 @@ def run_event_analysis(
         topic_info=topic_info,
     )
     parsed_mock_response = parse_event_response(raw_response)
-    parsed_mock_response = _apply_market_data_to_analysis(
+    parsed_mock_response = _apply_market_semantics_to_analysis(
         parsed_mock_response,
         market_data_context,
+        topic_info,
     )
     parsed_mock_response["evidence_pool"] = evidence_pool
     parsed_mock_response["_source"] = "mock"

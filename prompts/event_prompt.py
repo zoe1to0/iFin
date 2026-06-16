@@ -40,20 +40,13 @@ EVENT_OUTPUT_SCHEMA = {
     ],
     "key_data": [
         {
-            "name": "string",
-            "trend": "string",
-            "current": "string",
-            "change_1d": "string",
-            "change_1m": "string",
-            "change_3m": "string",
-            "change_1y": "string",
-            "percentile_1y": "string",
-            "as_of": "string",
+            "label": "string",
+            "value": "string",
+            "unit": "string",
             "period": "string",
+            "insight": "string",
             "source": "string",
-            "is_mock": "boolean",
-            "data_note": "string",
-            "explanation": "string",
+            "confidence": "estimated / cited / unavailable",
         }
     ],
     "logic_chain": [
@@ -241,8 +234,15 @@ Instructions:
 - For vague queries, include the current default understanding and other possible directions in the structured analysis.
 - Prioritize analysis grounded in the retrieved News context.
 - If the News context is empty or does not support a claim, explain the evidence gap in natural Chinese instead of exposing "evidence_insufficient" to the user.
+- Strictly separate Environment Variables from Event Variables.
+- Environment Variables belong in market_position only: tradable market proxies, prices, returns, percentile, market trend, and broader risk environment.
+- Event Variables belong in key_data only: fundamental drivers, business metrics, policy variables, supply-demand variables, and macro variables directly linked to the event.
+- key_data must never copy market_position. Do not put NVDA, QQQ, BOTZ, AMD, GLD, DXY, US10Y, SOXX, BTC, ETF prices, or other tradable proxy prices in key_data unless the item is explicitly a fundamental/event variable.
+- If no stable data source exists for an Event Variable, output it with confidence "unavailable", value "尚未接入稳定数据源", source "待接入主题变量数据源", and a concise insight explaining why it matters.
+- For AI themes, key_data examples include Cloud CAPEX, GPU demand, Data center investment, AI revenue growth, and Semiconductor supply constraint.
+- For precious-metal themes, key_data examples include ETF fund flow, Central bank gold purchases, Real yield, Inflation data, and Dollar trend.
 - For market_position, do not invent historical percentile, peer ranking, prices, yields, or calculated market data.
-- For market_position and key_data, prioritize Market data context when it is available.
+- For market_position, prioritize Market data context when it is available.
 - If Market data context is provided, reflect current, change_1d, change_1m, change_3m, change_1y, percentile_1y, as_of, period, source, and is_mock when relevant.
 - Only market_data items with "is_mock": false may be used as factual market data.
 - If a market_data item has "is_mock": true, treat it only as an internal unavailable-data marker and do not use it as evidence.

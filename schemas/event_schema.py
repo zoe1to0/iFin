@@ -25,11 +25,11 @@ EVENT_ANALYSIS_SCHEMA = {
     },
     "market_position": {
         "type": "array",
-        "description": "Market context indicators and relative position explanations.",
+        "description": "Environment variables such as tradable market proxies, price, return, percentile, and trend.",
     },
     "key_data": {
         "type": "array",
-        "description": "Key data points, trends, and neutral explanations.",
+        "description": "Event variables such as fundamental drivers, business metrics, policy variables, supply-demand variables, and macro drivers.",
     },
     "logic_chain": {
         "type": "array",
