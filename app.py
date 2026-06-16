@@ -32,7 +32,7 @@ def go_to(page):
 def render_sidebar():
     with st.sidebar:
         st.title("iFin")
-        st.caption("???????")
+        st.caption("Market insight assistant")
         nav_items = {
             "Home": "Home",
             "Events": "Event Analysis",

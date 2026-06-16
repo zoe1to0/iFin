@@ -192,6 +192,29 @@ def format_market_source(source):
     return text
 
 
+def render_market_meta_lines(
+    change_1d,
+    change_1m,
+    change_3m,
+    change_1y,
+    percentile_1y,
+    as_of,
+    source,
+    data_note="",
+    extra_lines=None,
+):
+    st.caption(f"1日：{change_1d} · 1月：{change_1m}")
+    st.caption(f"3月：{change_3m} · 1年：{change_1y}")
+    st.caption(f"1年历史分位：{percentile_1y}")
+    for line in extra_lines or []:
+        if line:
+            st.caption(line)
+    st.caption(f"时间基准：{as_of}")
+    st.caption(f"数据来源：{source}")
+    if data_note:
+        st.caption(data_note)
+
+
 def render_real_market_data_cards(items):
     cols = st.columns(min(len(items), 4) or 1)
     for column, item in zip(cols, items):
@@ -208,23 +231,23 @@ def render_real_market_data_cards(items):
             percentile_1y = format_percent_text(item.get("percentile_1y"), "暂不计算历史分位")
             insight = percentile_insight(percentile_1y)
             as_of = display_text(item.get("as_of"), "待数据接入")
-            st.markdown(
-                f"""
-                <div class="ifin-status-card">
-                    <div class="ifin-card-title">{label}</div>
-                    <div class="ifin-number-value">{current}</div>
-                    <div class="ifin-card-body">Insight：{insight}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            st.caption(f"1日：{change_1d} · 1月：{change_1m}")
-            st.caption(f"3月：{change_3m} · 1年：{change_1y}")
-            st.caption(f"1年历史分位：{percentile_1y}")
-            st.caption(f"截至：{as_of}")
-            st.caption(f"来源：{source}")
+            data_note = ""
             if as_of != "待数据接入":
-                st.caption(f"以 {as_of} 可得数据为基准。")
+                data_note = f"以 {as_of} 可得数据为基准。"
+            with st.container(border=True):
+                st.markdown(f"**{label}**")
+                st.markdown(f"### {current}")
+                st.write(f"Insight：{insight}")
+                render_market_meta_lines(
+                    change_1d,
+                    change_1m,
+                    change_3m,
+                    change_1y,
+                    percentile_1y,
+                    as_of,
+                    source,
+                    data_note,
+                )
 
 
 def _clean_url(value):
@@ -515,32 +538,30 @@ def render_market_context():
             as_of = display_text(item.get("as_of"), "待数据接入")
             source = display_text(item.get("source"), "待数据接入")
             mock_note = format_market_data_note(item)
-            st.markdown(
-                f"""
-                <div class="ifin-status-card">
-                    <div class="ifin-card-title">{name}</div>
-                    <div class="ifin-status-state">{state}</div>
-                    <div class="ifin-card-body">当前水平：{current}</div>
-                    <div class="ifin-position-track">
-                        <span class="ifin-position-dot" style="left: {position}%;"></span>
-                    </div>
-                    <div class="ifin-position-labels"><span>低</span><span>高</span></div>
-                    <div class="ifin-card-body">{note}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            st.caption(f"1日：{change_1d} · 1月：{change_1m}")
-            st.caption(f"3月：{change_3m} · 1年：{change_1y}")
-            st.caption(f"1年历史分位：{percentile_1y}")
-            st.caption(f"变化方向：{direction}")
-            st.caption(f"历史分位：{percentile}")
-            st.caption(f"同类/行业位置：{peer_position}")
-            if mock_note:
-                st.caption(mock_note)
-            st.caption(f"时间基准：{as_of}")
-            st.caption(f"数据来源：{source}")
-            st.caption(data_note)
+            extra_lines = [
+                f"变化方向：{direction}",
+                f"历史分位：{percentile}",
+                f"同类/行业位置：{peer_position}",
+                mock_note,
+            ]
+            with st.container(border=True):
+                st.markdown(f"**{name}**")
+                st.markdown(f"### {state}")
+                st.write(f"当前水平：{current}")
+                st.progress(max(0, min(int(position), 100)))
+                st.caption("低                                                        高")
+                st.write(note)
+                render_market_meta_lines(
+                    change_1d,
+                    change_1m,
+                    change_3m,
+                    change_1y,
+                    percentile_1y,
+                    as_of,
+                    source,
+                    data_note,
+                    extra_lines,
+                )
 
 
 def render_key_numbers():
@@ -577,26 +598,22 @@ def render_key_numbers():
             source = display_text(item.get("source"), "待数据接入")
             data_note = display_text(item.get("data_note"), "")
             mock_note = format_market_data_note(item)
-            st.markdown(
-                f"""
-                <div class="ifin-number-card">
-                    <div class="ifin-card-title">{name}</div>
-                    <div class="ifin-number-value">{value}</div>
-                    <span class="ifin-trend">{trend}</span>
-                    <div class="ifin-card-body">{note}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            st.caption(f"1日：{change_1d} · 1月：{change_1m}")
-            st.caption(f"3月：{change_3m} · 1年：{change_1y}")
-            st.caption(f"1年历史分位：{percentile_1y}")
-            if mock_note:
-                st.caption(mock_note)
-            st.caption(f"时间基准：{as_of}")
-            st.caption(f"数据来源：{source}")
-            if data_note:
-                st.caption(data_note)
+            with st.container(border=True):
+                st.markdown(f"**{name}**")
+                st.markdown(f"### {value}")
+                st.markdown(f"`{trend}`")
+                st.write(note)
+                render_market_meta_lines(
+                    change_1d,
+                    change_1m,
+                    change_3m,
+                    change_1y,
+                    percentile_1y,
+                    as_of,
+                    source,
+                    data_note,
+                    [mock_note],
+                )
 
 
 def render_impact_chain():
