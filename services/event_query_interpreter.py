@@ -6,6 +6,8 @@ an LLM and does not call external APIs.
 
 from __future__ import annotations
 
+from datetime import date
+
 
 def _unique(items: list[str]) -> list[str]:
     seen = set()
@@ -57,6 +59,147 @@ def interpret_event_query(query: str) -> dict:
 
     if not normalized_query:
         return result
+
+    # Company intent wins over sector intent when a named company is present.
+    if any(term in lower_query for term in ["英伟达", "nvidia", "nvda"]):
+        return _set_result(
+            result,
+            "company_event",
+            "公司事件",
+            f"暂将“{normalized_query}”理解为英伟达公司相关事件，而不是泛 AI 行业主题。",
+            [
+                {"label": "英伟达最新动态", "query": "英伟达 NVIDIA NVDA latest news"},
+                {"label": "英伟达财报与指引", "query": "英伟达 NVIDIA earnings guidance"},
+                {"label": "AI 芯片需求", "query": "NVIDIA AI GPU demand"},
+            ],
+            ["英伟达", "NVIDIA", "NVDA"],
+        )
+
+    if any(term in lower_query for term in ["腾讯", "tencent", "tcehy", "0700"]):
+        is_earnings = any(
+            term in lower_query
+            for term in ["财报", "业绩", "earnings", "revenue", "profit"]
+        )
+        intent = "earnings_event" if is_earnings else "company_event"
+        label = "财报事件" if is_earnings else "公司事件"
+        return _set_result(
+            result,
+            intent,
+            label,
+            f"暂将“{normalized_query}”理解为腾讯{'财报与经营变化' if is_earnings else '公司相关'}事件。",
+            [
+                {"label": "腾讯财报核心数据", "query": "腾讯 Tencent 0700 earnings revenue profit"},
+                {"label": "游戏与广告业务", "query": "腾讯 游戏 广告 Tencent gaming advertising"},
+                {"label": "管理层指引", "query": "腾讯 Tencent management guidance"},
+            ],
+            ["腾讯", "Tencent", "TCEHY", "0700", "财报", "earnings"],
+        )
+
+    if any(term in lower_query for term in ["苹果", "apple", "aapl", "wwdc"]):
+        year = str(date.today().year)
+        is_wwdc = "wwdc" in lower_query
+        return _set_result(
+            result,
+            "product_event" if is_wwdc else "company_event",
+            "产品事件" if is_wwdc else "公司事件",
+            (
+                f"暂将“{normalized_query}”理解为 Apple {year} 年 WWDC 产品与开发者生态事件。"
+                if is_wwdc
+                else f"暂将“{normalized_query}”理解为苹果公司相关事件。"
+            ),
+            [
+                {"label": f"WWDC {year} 发布内容", "query": f"Apple WWDC {year} announcements"},
+                {"label": "Apple AI 与系统更新", "query": f"Apple AI iOS WWDC {year}"},
+                {"label": "开发者与服务生态", "query": f"Apple developer services WWDC {year}"},
+            ],
+            ["Apple", "苹果", "WWDC", year] if is_wwdc else ["Apple", "苹果", "AAPL"],
+        )
+
+    if any(term in lower_query for term in ["美国cpi", "cpi", "通胀数据", "consumer price"]):
+        return _set_result(
+            result,
+            "macro_indicator",
+            "宏观指标",
+            f"暂将“{normalized_query}”理解为美国消费者价格与通胀路径相关的宏观指标。",
+            [
+                {"label": "美国 CPI 数据", "query": "US CPI inflation consumer price index"},
+                {"label": "核心通胀", "query": "US core CPI core inflation"},
+                {"label": "CPI 与利率预期", "query": "US CPI Fed rate expectations"},
+            ],
+            ["美国CPI", "CPI", "inflation", "通胀", "consumer price"],
+        )
+
+    if any(term in lower_query for term in ["美国非农", "非农就业", "非农", "nfp", "nonfarm", "payrolls"]):
+        return _set_result(
+            result,
+            "macro_indicator",
+            "宏观指标",
+            f"暂将“{normalized_query}”理解为美国非农就业与劳动力市场相关的宏观指标。",
+            [
+                {"label": "美国非农就业", "query": "US nonfarm payrolls NFP jobs report"},
+                {"label": "失业率与工资", "query": "US unemployment wage growth payrolls"},
+                {"label": "就业与利率预期", "query": "US jobs report Fed rate expectations"},
+            ],
+            ["美国非农", "非农就业", "nonfarm", "payrolls", "NFP", "jobs report"],
+        )
+
+    if any(term in lower_query for term in ["原油", "布油", "wti", "brent", "crude oil"]):
+        return _set_result(
+            result,
+            "commodity_asset",
+            "大宗商品资产",
+            f"暂将“{normalized_query}”理解为原油价格、供需与能源市场动向。",
+            [
+                {"label": "原油价格走势", "query": "crude oil Brent WTI price"},
+                {"label": "OPEC+ 供应政策", "query": "OPEC oil production supply"},
+                {"label": "库存与需求", "query": "oil inventory demand EIA"},
+            ],
+            ["原油", "布油", "oil", "crude", "Brent", "WTI"],
+        )
+
+    if any(term in lower_query for term in ["比特币", "bitcoin", "btc"]):
+        return _set_result(
+            result,
+            "crypto_asset",
+            "加密资产",
+            f"暂将“{normalized_query}”理解为比特币价格、资金流与加密市场动向。",
+            [
+                {"label": "比特币市场走势", "query": "Bitcoin BTC market price"},
+                {"label": "现货 ETF 资金流", "query": "Bitcoin spot ETF flows"},
+                {"label": "流动性与监管", "query": "Bitcoin liquidity regulation"},
+            ],
+            ["比特币", "Bitcoin", "BTC"],
+        )
+
+    if "机器人" in normalized_query or any(term in lower_query for term in ["robot", "robotics"]):
+        return _set_result(
+            result,
+            "sector_trend",
+            "行业板块",
+            f"暂将“{normalized_query}”理解为机器人产业链与商业化进展相关的行业主题。",
+            [
+                {"label": "人形机器人进展", "query": "humanoid robot robotics"},
+                {"label": "机器人产业链", "query": "机器人 产业链 robotics supply chain"},
+                {"label": "商业化与订单", "query": "robotics orders commercialization"},
+            ],
+            ["机器人", "robot", "robotics", "humanoid robot"],
+        )
+
+    if any(term in normalized_query for term in ["新能源车", "电动车"]) or any(
+        term in lower_query for term in ["electric vehicle", "ev market"]
+    ):
+        return _set_result(
+            result,
+            "sector_trend",
+            "行业板块",
+            f"暂将“{normalized_query}”理解为新能源汽车产业链、销量与竞争格局相关的行业主题。",
+            [
+                {"label": "新能源车销量", "query": "新能源车 电动车 EV sales"},
+                {"label": "价格竞争", "query": "新能源汽车 价格战 EV price competition"},
+                {"label": "电池与供应链", "query": "EV battery supply chain 新能源车"},
+            ],
+            ["新能源车", "电动车", "EV", "electric vehicle"],
+        )
 
     if "黄金" in normalized_query or "gold" in lower_query:
         keywords = [

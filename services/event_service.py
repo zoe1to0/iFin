@@ -12,6 +12,7 @@ from html import unescape
 
 from parsers.event_parser import parse_event_response
 from prompts.event_prompt import build_event_prompt
+from services.event_card_adapter import build_event_v2_card_pool
 from services.event_query_interpreter import interpret_event_query
 from services.market_data_service import MarketDataService
 from services.news_pipeline import search_event_news
@@ -163,6 +164,9 @@ def _build_evidence_pool(news_result: dict) -> list[dict]:
                 "date": item.get("date", ""),
                 "url": item.get("url", ""),
                 "summary": item.get("summary", ""),
+                "relevance_score": item.get("relevance_score", 0),
+                "matched_terms": item.get("matched_terms", []) or [],
+                "reject_reason": item.get("reject_reason", ""),
             }
         )
     return _clean_html_tags(evidence_pool)
@@ -516,10 +520,52 @@ def _has_meaningful_analysis(data: dict) -> bool:
     return non_empty_count >= 4
 
 
-def _safe_news_result(user_input: str) -> dict:
+def _apply_insufficient_evidence_guard(data: dict) -> dict:
+    """Keep unsupported analysis explicitly hypothetical and source-free."""
+    if not isinstance(data, dict):
+        return data
+
+    field_prefixes = {
+        "bull_case": "待验证假设：",
+        "bear_case": "待验证假设：",
+        "risk_radar": "待验证风险：",
+    }
+    for field in ["logic_chain", "bull_case", "bear_case", "historical_cases", "risk_radar", "next_watch"]:
+        items = data.get(field)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item["evidence_ids"] = []
+            if "source" in item:
+                item["source"] = ""
+            if "url" in item:
+                item["url"] = ""
+            prefix = field_prefixes.get(field)
+            key = "risk" if field == "risk_radar" else "point"
+            value = str(item.get(key, "") or "").strip()
+            if prefix and value and not value.startswith(("假设", "如果", "可能", "待验证")):
+                item[key] = f"{prefix}{value}"
+            if field == "logic_chain":
+                description = str(item.get("description", "") or "").strip()
+                if description and not description.startswith("研究框架（待验证）："):
+                    item["description"] = f"研究框架（待验证）：{description}"
+    return data
+
+
+def _safe_news_result(
+    user_input: str,
+    interpretation: dict | None = None,
+    topic_info: dict | None = None,
+) -> dict:
     """Return event news context, or a safe empty result if retrieval fails."""
     try:
-        news_result = search_event_news(user_input)
+        news_result = search_event_news(
+            user_input,
+            interpretation=interpretation,
+            topic_info=topic_info,
+        )
         if isinstance(news_result, dict):
             return news_result
     except Exception:
@@ -531,6 +577,11 @@ def _safe_news_result(user_input: str) -> dict:
         "titles": [],
         "context": "",
         "items": [],
+        "evaluated_items": [],
+        "filtered_count": 0,
+        "rejected_count": 0,
+        "evidence_status": "insufficient",
+        "retrieval_strategy": {},
     }
 
 
@@ -541,6 +592,7 @@ def _attach_debug_fields(
     interpretation: dict,
     market_data_context: dict | None = None,
     topic_info: dict | None = None,
+    news_result: dict | None = None,
 ) -> dict:
     """Attach internal news debug metadata to the parsed analysis result."""
     market_data_as_of, market_data_source, has_market_data = _summarize_market_data(
@@ -563,6 +615,26 @@ def _attach_debug_fields(
     result["_topic_label"] = topic_info.get("topic_label", "")
     result["_data_pack"] = topic_info.get("data_pack", [])
     result["_suggested_queries"] = topic_info.get("suggested_queries", [])
+    news_result = news_result or {}
+    result["_evidence_status"] = news_result.get("evidence_status", "insufficient")
+    result["_news_rejected_count"] = news_result.get("rejected_count", 0)
+    result["_news_titles"] = news_result.get("titles", [])
+    result["_retrieval_strategy"] = news_result.get("retrieval_strategy", {})
+    result["_source_plan"] = news_result.get("source_plan", [])
+    result["_attempted_sources"] = news_result.get("attempted_sources", [])
+    result["_successful_sources"] = news_result.get("successful_sources", [])
+    result["_failed_sources"] = news_result.get("failed_sources", [])
+    result["_query_variants"] = news_result.get("query_variants", [])
+    result["_source_coverage_failure_reason"] = news_result.get(
+        "source_coverage_failure_reason",
+        "",
+    )
+    return result
+
+
+def _attach_v2_card_pool(result: dict, event_title: str) -> dict:
+    """Attach the V2 adapter output while preserving the legacy Event result."""
+    result["v2_card_pool"] = build_event_v2_card_pool(result, event_title)
     return result
 
 
@@ -588,7 +660,11 @@ def run_event_analysis(
         interpretation=interpretation,
         topic_info=topic_info,
     )
-    news_result = _safe_news_result(search_query)
+    news_result = _safe_news_result(
+        user_input,
+        interpretation=interpretation,
+        topic_info=topic_info,
+    )
     titles = news_result.get("titles", []) or []
     context = news_result.get("context", "") or ""
     evidence_pool = _build_evidence_pool(news_result)
@@ -600,6 +676,8 @@ def run_event_analysis(
         "context": context,
         "market_data": market_data_context,
         "evidence_pool": evidence_pool,
+        "evidence_status": news_result.get("evidence_status", "insufficient"),
+        "news_count": news_result.get("news_count", 0),
     }
     prompt = build_event_prompt(event_data)
     if use_real_llm and LLMService is not None:
@@ -608,6 +686,10 @@ def run_event_analysis(
             if raw_llm_response and raw_llm_response != PLACEHOLDER_MESSAGE:
                 parsed_llm_response = parse_event_response(raw_llm_response)
                 if _has_meaningful_analysis(parsed_llm_response):
+                    if news_result.get("evidence_status") == "insufficient":
+                        parsed_llm_response = _apply_insufficient_evidence_guard(
+                            parsed_llm_response
+                        )
                     parsed_llm_response = _apply_market_semantics_to_analysis(
                         parsed_llm_response,
                         market_data_context,
@@ -615,14 +697,16 @@ def run_event_analysis(
                     )
                     parsed_llm_response["evidence_pool"] = evidence_pool
                     parsed_llm_response["_source"] = "llm"
-                    return _attach_debug_fields(
+                    parsed_llm_response = _attach_debug_fields(
                         parsed_llm_response,
                         titles,
                         context,
                         interpretation,
                         market_data_context,
                         topic_info,
+                        news_result,
                     )
+                    return _attach_v2_card_pool(parsed_llm_response, user_input)
         except Exception:
             pass
 
@@ -633,6 +717,8 @@ def run_event_analysis(
         topic_info=topic_info,
     )
     parsed_mock_response = parse_event_response(raw_response)
+    if news_result.get("evidence_status") == "insufficient":
+        parsed_mock_response = _apply_insufficient_evidence_guard(parsed_mock_response)
     parsed_mock_response = _apply_market_semantics_to_analysis(
         parsed_mock_response,
         market_data_context,
@@ -640,11 +726,13 @@ def run_event_analysis(
     )
     parsed_mock_response["evidence_pool"] = evidence_pool
     parsed_mock_response["_source"] = "mock"
-    return _attach_debug_fields(
+    parsed_mock_response = _attach_debug_fields(
         parsed_mock_response,
         titles,
         context,
         interpretation,
         market_data_context,
         topic_info,
+        news_result,
     )
+    return _attach_v2_card_pool(parsed_mock_response, user_input)

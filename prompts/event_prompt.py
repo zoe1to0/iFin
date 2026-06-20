@@ -146,6 +146,8 @@ def build_event_prompt(event_data: dict) -> str:
     context = event_data.get("context", "")
     market_data = event_data.get("market_data", {}) or {}
     evidence_pool = event_data.get("evidence_pool", []) or []
+    evidence_status = event_data.get("evidence_status", "insufficient")
+    news_count = event_data.get("news_count", len(titles))
     prompt_rules = topic_info.get("prompt_rules", []) or []
     topic_info_text = (
         json.dumps(topic_info, ensure_ascii=False, indent=2)
@@ -212,6 +214,12 @@ Market data context:
 Evidence pool:
 {evidence_pool_text}
 
+Evidence status:
+{evidence_status}
+
+Accepted news count:
+{news_count}
+
 Topic-specific prompt rules:
 {prompt_rules_text}
 
@@ -233,6 +241,12 @@ Instructions:
 - If the query is an asset/theme such as "黄金", analyze it as asset trend + related sectors + macro drivers.
 - For vague queries, include the current default understanding and other possible directions in the structured analysis.
 - Prioritize analysis grounded in the retrieved News context.
+- Treat Evidence status as a hard evidence boundary, not as optional metadata.
+- When Evidence status is "insufficient" or Accepted news count is 0, never write "公开新闻显示", "市场消息显示", "新闻显示", or imply that an event has occurred based on retrieved reporting.
+- With insufficient evidence, event_summary may only state that verifiable news evidence is currently unavailable, identify the data normally needed to analyze the topic, and list information that must be added or verified.
+- With insufficient evidence, bull_case and bear_case must be explicitly conditional research hypotheses, not claims about events that have occurred.
+- With insufficient evidence, do not claim that any actor has acted and do not claim a market reaction. Use empty evidence_ids and natural evidence-gap wording.
+- With insufficient evidence, source and url must be empty strings. Do not use generic pseudo-sources such as "公开新闻语境" or "市场消息".
 - If the News context is empty or does not support a claim, explain the evidence gap in natural Chinese instead of exposing "evidence_insufficient" to the user.
 - Strictly separate Environment Variables from Event Variables.
 - Environment Variables belong in market_position only: tradable market proxies, prices, returns, percentile, market trend, and broader risk environment.

@@ -983,28 +983,276 @@ def render_event_beta_disclaimer():
     )
 
 
-def render_event_analysis():
-    if "pending_event_input" in st.session_state:
-        st.session_state["event_input"] = st.session_state.pop("pending_event_input")
+RESEARCH_DECK_ITEMS = [
+    {"id": "views", "title": "观点矛盾"},
+    {"id": "history", "title": "历史镜像"},
+    {"id": "variables", "title": "关键变量"},
+    {"id": "risk", "title": "风险来源"},
+    {"id": "transmission", "title": "影响路径"},
+    {"id": "watch", "title": "后续观察"},
+]
 
+
+def _first_dict(items):
+    return next((item for item in safe_get_list(items) if isinstance(item, dict)), {})
+
+
+def _research_source_preview(item, result):
+    sources = []
+    for evidence in get_evidence_items(item, result):
+        source = display_text(evidence.get("source"), "")
+        if source and source not in sources:
+            sources.append(source)
+    direct_source = normalize_source_name(item)
+    if direct_source and direct_source not in sources:
+        sources.append(direct_source)
+    return sources[:2] or ["公开新闻语境"]
+
+
+def build_research_card(selected_id, result):
+    result = result or {}
+    if selected_id == "views":
+        support = _first_dict(result.get("bull_case"))
+        concern = _first_dict(result.get("bear_case"))
+        support_text = safe_item_text(support, "point", "支持逻辑仍需更多证据验证。")
+        concern_text = safe_item_text(concern, "point", "谨慎逻辑仍需更多证据验证。")
+        sources = _research_source_preview(support, result)
+        sources.extend(
+            source
+            for source in _research_source_preview(concern, result)
+            if source not in sources
+        )
+        return {
+            "title": "观点矛盾",
+            "core": "市场同时存在不同解释，关键在于哪些变量会被后续证据验证。",
+            "support": support_text,
+            "caution": concern_text,
+            "sources": sources[:2],
+        }
+    if selected_id == "history":
+        item = _first_dict(result.get("historical_cases"))
+        return {
+            "title": "历史镜像",
+            "core": display_text(
+                item.get("similarity") or item.get("market_reaction"),
+                "历史案例可以提供参照，但不代表当前市场会重复同一路径。",
+            ),
+            "support": display_text(item.get("title"), "历史参考仍待补充"),
+            "caution": display_text(item.get("limitation") or item.get("risk"), "历史环境存在差异。"),
+            "sources": _research_source_preview(item, result),
+        }
+    if selected_id == "variables":
+        items = safe_get_list(result.get("key_data_items"))
+        labels = [
+            display_text(item.get("label") or item.get("name"), "")
+            for item in items
+            if isinstance(item, dict)
+        ]
+        labels = [label for label in labels if label]
+        return {
+            "title": "关键变量",
+            "core": "当前主题需要通过核心事件变量验证，而不是用行情代理替代基本面证据。",
+            "support": "重点观察：" + ("、".join(labels[:3]) or "政策、需求与供给变量"),
+            "caution": "部分变量尚未接入稳定数据源。",
+            "sources": ["主题变量数据源待接入"],
+        }
+    if selected_id == "risk":
+        item = _first_dict(result.get("risk_radar"))
+        return {
+            "title": "风险来源",
+            "core": safe_item_text(item, "risk", "当前风险需要结合新闻和数据继续验证。"),
+            "support": display_text(item.get("reason"), "风险触发条件仍需观察。"),
+            "caution": display_text(item.get("historical_reference"), "历史参考仍需补强。"),
+            "sources": _research_source_preview(item, result),
+        }
+    if selected_id == "transmission":
+        steps = [item for item in safe_get_list(result.get("logic_chain")) if isinstance(item, dict)]
+        first = steps[0] if steps else {}
+        last = steps[-1] if steps else {}
+        return {
+            "title": "影响路径",
+            "core": "从事件触发到资产影响，重点是中间变量如何改变市场预期。",
+            "support": display_text(first.get("content") or first.get("description"), "事件起点待确认。"),
+            "caution": display_text(last.get("content") or last.get("description"), "最终影响仍存在不确定性。"),
+            "sources": _research_source_preview(first, result),
+        }
+    item = _first_dict(result.get("next_watch"))
+    return {
+        "title": "后续观察",
+        "core": safe_item_text(item, "item", "后续需要持续观察新的公开信息。"),
+        "support": display_text(item.get("description") or item.get("why"), "用于验证当前市场解释是否持续。"),
+        "caution": "观察方向不代表确定结论。",
+        "sources": _research_source_preview(item, result),
+    }
+
+
+def select_mobile_research_evidence():
+    selected_id = st.session_state.get("event_mobile_evidence")
+    if selected_id:
+        st.session_state.event_selected_evidence = selected_id
+        st.session_state.event_full_analysis_open = False
+        st.session_state.event_research_card_animate = True
+
+
+def render_research_deck():
+    st.markdown('<div class="ifin-prototype-label">RESEARCH DECK</div>', unsafe_allow_html=True)
+    selected_id = st.session_state.get("event_selected_evidence", "")
+    with st.container(key="event_deck_desktop"):
+        for deck_item in RESEARCH_DECK_ITEMS:
+            with st.container(key=f"event_deck_material_{deck_item['id']}"):
+                if selected_id == deck_item["id"]:
+                    st.markdown(
+                        '<span class="ifin-deck-selected-marker"></span>',
+                        unsafe_allow_html=True,
+                    )
+                if st.button(
+                    deck_item["title"],
+                    key=f"event_deck_{deck_item['id']}",
+                    width="stretch",
+                ):
+                    st.session_state.event_selected_evidence = deck_item["id"]
+                    st.session_state.event_full_analysis_open = False
+                    st.session_state.event_research_card_animate = True
+                    st.rerun()
+
+    st.radio(
+        "Research Deck",
+        [item["id"] for item in RESEARCH_DECK_ITEMS],
+        format_func=lambda value: next(
+            item["title"] for item in RESEARCH_DECK_ITEMS if item["id"] == value
+        ),
+        index=None,
+        horizontal=True,
+        key="event_mobile_evidence",
+        on_change=select_mobile_research_evidence,
+        label_visibility="collapsed",
+    )
+
+
+def render_research_card(selected_id, result):
+    card = build_research_card(selected_id, result)
+    sources = " · ".join(card["sources"])
+    enter_class = (
+        " ifin-research-card-enter"
+        if st.session_state.get("event_research_card_animate")
+        else ""
+    )
     st.markdown(
-        """
-        <div class="ifin-event-input">
-            <div class="ifin-kicker">Event Analysis V1.5</div>
-            <h1>事件分析</h1>
-            <p class="ifin-hero-subtitle">从事件、数据与历史中理解市场变化。</p>
+        f"""
+        <div class="ifin-research-card{enter_class}">
+            <div class="ifin-prototype-label">RESEARCH CARD</div>
+            <div class="ifin-research-title">{escape(card['title'], quote=True)}</div>
+            <div class="ifin-research-core">{escape(card['core'], quote=True)}</div>
+            <div class="ifin-research-contrast">
+                <div><strong>支持观察</strong><br>{escape(card['support'], quote=True)}</div>
+                <div><strong>谨慎观察</strong><br>{escape(card['caution'], quote=True)}</div>
+            </div>
+            <div class="ifin-research-source">来源预览：{escape(sources, quote=True)}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    event_text = st.text_area(
-        "输入事件",
-        placeholder="输入你想分析的市场事件，例如：美联储利率决议影响市场风险偏好",
+    st.session_state.event_research_card_animate = False
+    button_label = "收起完整分析" if st.session_state.get("event_full_analysis_open") else "查看完整分析"
+    if st.button(button_label, key="event_toggle_full_analysis", width="stretch"):
+        st.session_state.event_full_analysis_open = not st.session_state.get(
+            "event_full_analysis_open",
+            False,
+        )
+        st.rerun()
+
+
+def render_market_snapshot(result, compact=False):
+    market_items = safe_get_list(
+        (result or {}).get("market_position_items")
+        or (result or {}).get("market_position")
+    )
+    first_market = _first_dict(market_items)
+    key_items = safe_get_list((result or {}).get("key_data_items"))
+    etf_item = next(
+        (
+            item
+            for item in key_items
+            if isinstance(item, dict) and "etf" in str(item.get("label", "")).lower()
+        ),
+        {},
+    )
+    position = display_text(
+        first_market.get("percentile_1y") or first_market.get("position"),
+        "待数据接入",
+    )
+    price = display_text(first_market.get("current"), "待数据接入")
+    etf_flow = display_text(etf_item.get("value"), "待数据接入")
+    real_yield = next(
+        (
+            display_text(item.get("value"), "待数据接入")
+            for item in key_items
+            if isinstance(item, dict) and "yield" in str(item.get("label", "")).lower()
+        ),
+        "待数据接入",
+    )
+    freshness = display_text(
+        (result or {}).get("_market_data_as_of"),
+        "Latest available",
+    )
+    compact_class = " ifin-snapshot-compact" if compact else ""
+    st.markdown(
+        f"""
+        <div class="ifin-market-snapshot{compact_class}">
+            <div class="ifin-prototype-label">MARKET SNAPSHOT</div>
+            <div class="ifin-snapshot-grid">
+                <div><span>Market Position</span><strong>{escape(position, quote=True)}</strong></div>
+                <div><span>Price</span><strong>{escape(price, quote=True)}</strong></div>
+                <div><span>ETF Flow</span><strong>{escape(etf_flow, quote=True)}</strong></div>
+                <div><span>Real Yield</span><strong>{escape(real_yield, quote=True)}</strong></div>
+            </div>
+            <div class="ifin-research-source">Freshness：{escape(freshness, quote=True)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_selected_full_analysis(selected_id):
+    st.markdown('<div class="ifin-full-analysis-anchor"></div>', unsafe_allow_html=True)
+    if selected_id == "views":
+        render_bull_vs_bear()
+    elif selected_id == "history":
+        render_historical_reference()
+    elif selected_id == "variables":
+        render_key_numbers()
+    elif selected_id == "risk":
+        render_risk_radar()
+    elif selected_id == "transmission":
+        render_impact_chain()
+    else:
+        render_watch_next()
+    render_event_evidence_pool()
+    render_ifin_insight()
+
+
+def render_event_analysis():
+    if "pending_event_input" in st.session_state:
+        st.session_state["event_input"] = st.session_state.pop("pending_event_input")
+    st.session_state.setdefault("event_selected_evidence", "")
+    st.session_state.setdefault("event_full_analysis_open", False)
+    st.session_state.setdefault("event_research_card_animate", False)
+
+    st.markdown('<div class="ifin-prototype-search-label">SEARCH</div>', unsafe_allow_html=True)
+    event_text = st.text_input(
+        "Search",
+        placeholder="搜索事件、主题、公司或市场问题",
         key="event_input",
+        label_visibility="collapsed",
     )
     if st.session_state.get("event_explore_notice"):
         st.info(st.session_state.pop("event_explore_notice"))
-    use_real_llm = st.checkbox("使用真实 LLM 分析", value=False)
+    search_control, analysis_control = st.columns([3, 1])
+    with search_control:
+        use_real_llm = st.checkbox("使用真实 LLM 分析", value=False)
+    with analysis_control:
+        start_analysis = st.button("开始分析", width="stretch")
+
     current_result = get_event_analysis_result()
     typed_input = event_text.strip()
     input_interpretation = interpret_event_query(typed_input) if typed_input else {}
@@ -1037,7 +1285,7 @@ def render_event_analysis():
                     st.session_state["pending_event_input"] = query
                     st.session_state["event_explore_notice"] = f"已填入：{label}，可以点击“开始分析”继续。"
                     st.rerun()
-    if st.button("开始分析", width="stretch"):
+    if start_analysis:
         analysis_input = event_text.strip() or EVENT_DEMO["examples"][0]
         st.session_state.current_event_title = analysis_input
         st.session_state.event_analysis_result = run_event_analysis(
@@ -1046,21 +1294,80 @@ def render_event_analysis():
         )
         st.session_state.event_analysis_mode = "Real LLM" if use_real_llm else "Mock Pipeline"
         st.session_state.event_demo_ready = True
+        st.session_state.event_selected_evidence = ""
+        st.session_state.event_full_analysis_open = False
+        st.rerun()
 
     if event_text:
         st.session_state.current_event_title = event_text.strip()
     else:
         st.session_state.current_event_title = EVENT_DEMO["examples"][0]
 
-    render_event_summary()
-    render_event_evidence_pool()
-    render_market_context()
-    render_key_numbers()
-    render_impact_chain()
-    render_bull_vs_bear()
-    render_historical_reference()
-    render_risk_radar()
-    render_ifin_insight()
-    render_watch_next()
-    render_event_notes()
+    result = get_event_analysis_result()
+    topic_title = display_text(st.session_state.current_event_title, "Gold")
+    freshness = display_text((result or {}).get("_market_data_as_of"), "Latest available")
+    current_understanding = display_text(
+        (result or {}).get("event_summary"),
+        "当前理解仍在形成，选择一个研究角度开始调取依据。",
+    )
+    st.markdown(
+        f"""
+        <div class="ifin-prototype-topic-header">
+            <div>
+                <div class="ifin-prototype-topic">{escape(topic_title, quote=True)}</div>
+                <div class="ifin-prototype-understanding">
+                    <strong>Current Understanding</strong><br>
+                    {escape(current_understanding, quote=True)}
+                </div>
+            </div>
+            <div class="ifin-prototype-freshness">Updated {escape(freshness, quote=True)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if has_low_evidence(result):
+        st.info("当前公开信息有限，本次结果更适合作为研究角度梳理。")
+
+    selected_id = st.session_state.get("event_selected_evidence", "")
+    if selected_id:
+        deck_column, card_column, snapshot_column = st.columns([1, 3, 1], gap="medium")
+        with deck_column:
+            render_research_deck()
+        with card_column:
+            render_research_card(selected_id, result)
+        with snapshot_column:
+            render_market_snapshot(result, compact=True)
+    else:
+        deck_column, snapshot_column = st.columns([1, 4], gap="medium")
+        with deck_column:
+            render_research_deck()
+        with snapshot_column:
+            st.markdown(
+                """
+                <div class="ifin-prototype-empty-focus">
+                    Select one research angle from the deck to pull it into focus.
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            render_market_snapshot(result, compact=False)
+
+    if selected_id and st.session_state.get("event_full_analysis_open"):
+        render_selected_full_analysis(selected_id)
+
+    with st.expander("My Note · Optional", expanded=False):
+        judgment = st.radio(
+            "Current view",
+            ["Skip", "Bullish", "Bearish", "Watch"],
+            horizontal=True,
+            key="event_prototype_judgment",
+        )
+        if judgment != "Skip":
+            st.multiselect(
+                "Which evidence influenced your thinking?",
+                [item["title"] for item in RESEARCH_DECK_ITEMS],
+                key="event_prototype_influences",
+                placeholder="Optional",
+            )
+        render_event_notes()
     render_event_beta_disclaimer()

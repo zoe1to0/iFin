@@ -217,6 +217,46 @@ THEME_PACKAGES: dict[str, dict] = {
             "Analyze housing sales, financing risk, policy support, mortgage rates, and property-chain spillovers.",
         ],
     },
+    "robotics": {
+        "label": "机器人产业链",
+        "keywords": ["机器人", "robot", "robotics", "humanoid robot"],
+        "data_pack": [],
+        "search_expansion": ["机器人", "robot", "robotics", "humanoid robot"],
+        "suggested_queries": _suggested(
+            [
+                ("人形机器人进展", "人形机器人 humanoid robot"),
+                ("机器人产业链", "机器人 产业链 robotics supply chain"),
+                ("商业化与订单", "机器人 订单 商业化 robotics orders"),
+            ]
+        ),
+        "logic_chain_template": [
+            {"title": "主题输入", "content": "机器人产业链", "description": "将输入识别为机器人行业主题。"},
+            {"title": "产业变量", "content": "技术 / 成本 / 订单 / 量产", "description": "技术成熟度和量产能力决定商业化节奏。"},
+            {"title": "资金偏好", "content": "产业资本与主题资金", "description": "订单和资本开支变化影响市场关注度。"},
+            {"title": "板块表现", "content": "本体 / 零部件 / 自动化", "description": "产业链环节可能因兑现节奏不同而分化。"},
+        ],
+        "prompt_rules": ["Analyze robotics commercialization, orders, costs, supply chain, and deployment evidence."],
+    },
+    "new_energy_vehicle": {
+        "label": "新能源汽车",
+        "keywords": ["新能源车", "电动车", "electric vehicle", "EV market"],
+        "data_pack": [],
+        "search_expansion": ["新能源车", "电动车", "electric vehicle", "EV sales"],
+        "suggested_queries": _suggested(
+            [
+                ("新能源车销量", "新能源车 电动车 EV sales"),
+                ("价格竞争", "新能源车 价格战 EV price competition"),
+                ("电池与供应链", "EV battery supply chain 新能源车"),
+            ]
+        ),
+        "logic_chain_template": [
+            {"title": "主题输入", "content": "新能源汽车产业链", "description": "将输入识别为新能源汽车行业主题。"},
+            {"title": "产业变量", "content": "销量 / 价格 / 电池 / 政策", "description": "销量、价格竞争和供应链共同影响经营预期。"},
+            {"title": "资金偏好", "content": "整车与供应链估值", "description": "盈利兑现和竞争格局影响资金选择。"},
+            {"title": "板块表现", "content": "整车 / 电池 / 零部件", "description": "不同环节可能因利润率与需求变化而分化。"},
+        ],
+        "prompt_rules": ["Analyze EV sales, pricing, battery supply chain, policy, exports, and margins."],
+    },
     "company": {
         "label": "公司事件",
         "keywords": ["NVDA", "AAPL", "TSLA", "英伟达", "苹果", "特斯拉"],
@@ -295,10 +335,11 @@ THEME_MATCH_ORDER = [
     "macro",
     "commodity",
     "real_estate",
+    "robotics",
+    "new_energy_vehicle",
 ]
 
 
 def get_theme_package(topic_type: str) -> dict:
     """Return a theme package with general fallback."""
     return THEME_PACKAGES.get(topic_type) or THEME_PACKAGES["general"]
-

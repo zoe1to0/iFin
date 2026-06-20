@@ -34,7 +34,22 @@ def _format_query_templates(items: list[dict], query: str) -> list[dict[str, str
     return formatted
 
 
-def _package_response(raw_query: str, topic_type: str) -> dict:
+INTENT_BY_TOPIC = {
+    "precious_metal": "asset_trend",
+    "crypto": "crypto_asset",
+    "commodity": "commodity_asset",
+    "macro": "macro_event",
+    "company": "company_event",
+    "ai_sector": "sector_trend",
+    "semiconductor": "sector_trend",
+    "robotics": "sector_trend",
+    "new_energy_vehicle": "sector_trend",
+    "real_estate": "sector_trend",
+    "general": "vague_query",
+}
+
+
+def _package_response(raw_query: str, topic_type: str, primary_intent: str = "") -> dict:
     normalized_query = _normalize(raw_query)
     package = get_theme_package(topic_type)
     search_expansion = [normalized_query] if normalized_query else []
@@ -46,6 +61,7 @@ def _package_response(raw_query: str, topic_type: str) -> dict:
         "raw_query": raw_query or "",
         "normalized_query": normalized_query,
         "topic_type": topic_type,
+        "primary_intent": primary_intent or INTENT_BY_TOPIC.get(topic_type, "vague_query"),
         "topic_label": package.get("label", ""),
         "data_pack": package.get("data_pack", []),
         "search_expansion": search_expansion,
@@ -64,6 +80,25 @@ def route_topic(query: str) -> dict:
     normalized_query = _normalize(raw_query)
     if not normalized_query:
         return _package_response(raw_query, "general")
+
+    lower_query = normalized_query.lower()
+    if any(term in lower_query for term in ["英伟达", "nvidia", "nvda"]):
+        return _package_response(raw_query, "company", "company_event")
+    if any(term in lower_query for term in ["腾讯", "tencent", "tcehy", "0700"]):
+        intent = "earnings_event" if any(
+            term in lower_query for term in ["财报", "业绩", "earnings", "revenue", "profit"]
+        ) else "company_event"
+        return _package_response(raw_query, "company", intent)
+    if any(term in lower_query for term in ["苹果", "apple", "aapl", "wwdc"]):
+        return _package_response(
+            raw_query,
+            "company",
+            "product_event" if "wwdc" in lower_query else "company_event",
+        )
+    if any(term in lower_query for term in ["美国cpi", "cpi", "通胀数据", "consumer price"]):
+        return _package_response(raw_query, "macro", "macro_indicator")
+    if any(term in lower_query for term in ["美国非农", "非农就业", "非农", "nfp", "nonfarm", "payrolls"]):
+        return _package_response(raw_query, "macro", "macro_indicator")
 
     company_package = THEME_PACKAGES["company"]
     company_names = {keyword.lower() for keyword in company_package.get("keywords", [])}

@@ -2,6 +2,7 @@ import streamlit as st
 
 from modules.mock_data import PROFILE_DATA
 from ui.event_page import render_event_analysis
+from ui.evidence_fan_lab import render_evidence_fan_lab
 from ui.guide_page import render_guide
 from ui.home_page import render_home
 from ui.profile_page import render_profile
@@ -36,6 +37,7 @@ def render_sidebar():
         nav_items = {
             "Home": "Home",
             "Events": "Event Analysis",
+            "Fan Lab": "Evidence Fan Lab",
             "Reports": "Financial Analysis",
             "Profile": "Profile",
             "Guide": "Guide",
@@ -56,6 +58,8 @@ if page == "Home":
     render_home()
 elif page == "Event Analysis":
     render_event_analysis()
+elif page == "Evidence Fan Lab":
+    render_evidence_fan_lab()
 elif page == "Financial Analysis":
     render_financial_analysis()
 elif page == "Profile":
