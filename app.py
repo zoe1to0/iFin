@@ -6,7 +6,7 @@ from ui.evidence_fan_lab import render_evidence_fan_lab
 from ui.guide_page import render_guide
 from ui.home_page import render_home
 from ui.profile_page import render_profile
-from ui.report_page import render_financial_analysis
+from ui.company_page import render_company_page
 from ui.settings_page import render_settings
 from ui.styles import inject_styles
 
@@ -38,7 +38,7 @@ def render_sidebar():
             "Home": "Home",
             "Events": "Event Analysis",
             "Fan Lab": "Evidence Fan Lab",
-            "Reports": "Financial Analysis",
+            "Company": "Company Research",
             "Profile": "Profile",
             "Guide": "Guide",
             "Settings": "Settings",
@@ -60,8 +60,8 @@ elif page == "Event Analysis":
     render_event_analysis()
 elif page == "Evidence Fan Lab":
     render_evidence_fan_lab()
-elif page == "Financial Analysis":
-    render_financial_analysis()
+elif page in {"Company Research", "Financial Analysis"}:
+    render_company_page()
 elif page == "Profile":
     render_profile()
 elif page == "Guide":
